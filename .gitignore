@@ -1,0 +1,13 @@
+# Build outputs
+ME-Pro-EQ/build*/
+ME-Pro-EQ/Build/*
+!ME-Pro-EQ/Build/README.md
+*.vst3/
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+Thumbs.db
+__pycache__/
