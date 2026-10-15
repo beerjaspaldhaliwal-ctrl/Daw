@@ -55,6 +55,8 @@ Source: "..\LICENSES\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignorever
 Source: "..\LICENSES\VST3_SDK_MIT.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Documentation\UserManual.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Documentation\Installation.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Documentation\DSP_Design.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Documentation\ValidationReport.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [UninstallDelete]
 ; Only what the installer itself created. User presets are handled in [Code] below (opt-in).
