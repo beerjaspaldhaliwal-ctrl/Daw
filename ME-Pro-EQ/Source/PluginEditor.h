@@ -23,8 +23,16 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    // Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo (Cmd on macOS). Keys not consumed here go back to the host.
+    bool keyPressed (const juce::KeyPress&) override;
+
     // Runs one UI refresh cycle immediately (used by the UI timer and by the tests).
     void refreshNow (double dt);
+
+    // Exposed for the editor tests.
+    mepro::ui::HeaderBar& getHeader() noexcept { return header; }
+    mepro::ui::MeterStrip& getMeters() noexcept { return meters; }
+    mepro::ui::EditorModel& getModel() noexcept { return model; }
 
 private:
     void timerCallback() override;

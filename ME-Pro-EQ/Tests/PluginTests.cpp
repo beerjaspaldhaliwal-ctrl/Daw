@@ -320,3 +320,89 @@ ME_TEST ("Plugin", EditorOpensRendersAndEdits)
     ed.reset();
     CHECK (p.getAuditionBand() == -1);
 }
+
+ME_TEST ("Plugin", EditorUndoABPresetAndLevelMatch)
+{
+    // Drives the editor's own controls: edits through the editor model are undoable (also via Ctrl+Z),
+    // A/B and preset stepping work from the header, and MATCH sets the output trim from measured levels.
+    juceInit();
+    const double fs = 48000.0;
+    MEProEQAudioProcessor p;
+    p.prepareToPlay (fs, 480);
+    auto edBase = std::unique_ptr<juce::AudioProcessorEditor> (p.createEditor());
+    auto* ed = dynamic_cast<MEProEQAudioProcessorEditor*> (edBase.get());
+    CHECK (ed != nullptr);
+    if (ed == nullptr)
+        return;
+    auto& model = ed->getModel();
+    auto& u = p.getUndoHistory();
+
+    const int b = model.createBand (1000.0, 6.0, mepro::dsp::FilterType::Bell);
+    CHECK (b == 0);
+    CHECK (u.undoSteps() == 1); // creating a band (several parameters) is one action
+    model.beginGesture (b, BandParam::Freq);
+    for (float f = 1000.0f; f < 3000.0f; f += 100.0f)
+        model.setDuringGesture (b, BandParam::Freq, f);
+    model.endGesture (b, BandParam::Freq);
+    CHECK (u.undoSteps() == 2);
+    model.resetBandKeepFrequency (b);
+    CHECK (u.undoSteps() == 3);
+    CHECK_NEAR (getParam (p, bp (b, BandParam::Gain)), 0.0f, 1e-6f);
+
+    CHECK (ed->keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))); // undo reset
+    CHECK_NEAR (getParam (p, bp (b, BandParam::Gain)), 6.0f, 1e-5f);
+    CHECK (ed->keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0)));
+    CHECK_NEAR (getParam (p, bp (b, BandParam::Gain)), 0.0f, 1e-5f);
+    CHECK (ed->keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0)));
+    CHECK (ed->keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0))); // undo drag
+    CHECK_NEAR (getParam (p, bp (b, BandParam::Freq)), 1000.0f, 0.01f);
+    CHECK (ed->keyPressed (juce::KeyPress ('y', juce::ModifierKeys::commandModifier, 0)));
+    CHECK_NEAR (getParam (p, bp (b, BandParam::Freq)), 2900.0f, 0.05f);
+    CHECK (! ed->keyPressed (juce::KeyPress ('z', 0, 0))); // plain keys are left to the host
+
+    // A/B from the header
+    auto& header = ed->getHeader();
+    header.selectSlot (true);
+    CHECK (p.getAB().getActive() == mepro::state::ABComparison::Slot::B);
+    model.set (b, BandParam::Gain, -4.0f);
+    header.selectSlot (false);
+    CHECK_NEAR (getParam (p, bp (b, BandParam::Gain)), 6.0f, 1e-5f);
+    header.copySlot();
+    CHECK (! p.getAB().slotsDiffer());
+
+    // Preset stepping from the header
+    header.stepPreset (1);
+    CHECK (p.getPresets().getCurrentName() == p.getPresets().getPresets().front().name);
+    CHECK (! p.getPresets().isModified());
+    header.stepPreset (-1);
+    CHECK (p.getPresets().getCurrentName() == p.getPresets().getPresets().back().name);
+    p.getPresets().loadDefault();
+
+    // Level match: +6 dB broadband bell -> output louder than input -> MATCH brings it back to ~0 dB.
+    model.createBand (1000.0, 6.0, mepro::dsp::FilterType::Bell);
+    model.set (0, BandParam::Q, 0.1f);
+    auto x = pinkNoise ((int) fs * 15, 0.3, 4); // 5 time constants of the 3 s level meters
+    auto run = [&]
+    {
+        std::vector<float> l (x.begin(), x.end()), r = l;
+        renderStereo (p, l, r, 480);
+        ed->refreshNow (0.03);
+    };
+    run();
+    const float before = p.getEngine().getOutputRmsDb() - p.getEngine().getInputRmsDb();
+    const auto steps = u.undoSteps();
+    CHECK (ed->getMeters().matchOutputLevel());
+    CHECK (u.undoSteps() == steps + 1);
+    run();
+    const float after = p.getEngine().getOutputRmsDb() - p.getEngine().getInputRmsDb();
+    measure ("level difference before MATCH (dB)", (double) before);
+    measure ("level difference after MATCH (dB)", (double) after);
+    CHECK (before > 3.0f);
+    CHECK (std::abs (after) < 0.5f);
+
+    // The editor renders with the new header at the minimum size.
+    ed->setSize (980, 620);
+    ed->refreshNow (0.03);
+    const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+    CHECK (img.isValid());
+}

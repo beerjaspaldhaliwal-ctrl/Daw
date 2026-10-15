@@ -2,6 +2,7 @@
 // Lower panel: band selector chips and the detailed controls of the selected band.
 #pragma once
 
+#include "Bindings.h"
 #include "EditorModel.h"
 #include "ValueKnob.h"
 
@@ -64,8 +65,8 @@ private:
     DynamicGainMeter dynMeter;
     juce::Label title, hint, dynNote;
 
-    std::unique_ptr<juce::ComboBoxParameterAttachment> typeAtt, slopeAtt, stereoAtt, detAtt, scAtt;
-    std::unique_ptr<juce::ButtonParameterAttachment> powerAtt, dynAtt;
+    std::unique_ptr<ComboBinding> typeAtt, slopeAtt, stereoAtt, detAtt, scAtt;
+    std::unique_ptr<ToggleBinding> powerAtt, dynAtt;
     int boundBand = -2;
     juce::Rectangle<int> dynArea, mainArea;
 

@@ -714,12 +714,7 @@ void EQGraph::showBandMenu (int b)
                          else if (r == 1) md.toggleBand (b);
                          else if (r == 2) md.set (b, BandParam::DynOn, md.get (b, BandParam::DynOn) > 0.5f ? 0.0f : 1.0f);
                          else if (r == 3) pr.setAuditionBand (pr.getAuditionBand() == b ? -1 : b);
-                         else if (r == 4)
-                         {
-                             const auto f = md.get (b, BandParam::Freq);
-                             md.resetBand (b);
-                             md.set (b, BandParam::Freq, f);
-                         }
+                         else if (r == 4) md.resetBandKeepFrequency (b);
                          else if (r == 5) md.deleteBand (b);
                      });
 }

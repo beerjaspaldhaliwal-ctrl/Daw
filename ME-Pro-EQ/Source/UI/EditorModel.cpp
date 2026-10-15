@@ -13,6 +13,11 @@ EditorModel::EditorModel (MEProEQAudioProcessor& p)
         selected = -1;
 }
 
+state::UndoHistory& EditorModel::getUndo() noexcept
+{
+    return processor.getUndoHistory();
+}
+
 juce::RangedAudioParameter* EditorModel::param (int band, BandParam p) const
 {
     return state.getParameter (params::bandParamId (band, p));
@@ -50,6 +55,7 @@ dsp::DesignSpec EditorModel::spec (int band) const
 
 void EditorModel::set (int band, BandParam p, float v)
 {
+    state::UndoHistory::Scope action (getUndo());
     if (auto* rp = param (band, p))
     {
         rp->beginChangeGesture();
@@ -60,6 +66,7 @@ void EditorModel::set (int band, BandParam p, float v)
 
 void EditorModel::beginGesture (int band, BandParam p)
 {
+    getUndo().begin();
     if (auto* rp = param (band, p))
         rp->beginChangeGesture();
 }
@@ -74,6 +81,7 @@ void EditorModel::endGesture (int band, BandParam p)
 {
     if (auto* rp = param (band, p))
         rp->endChangeGesture();
+    getUndo().end();
 }
 
 void EditorModel::setSelectedBand (int band)
@@ -88,6 +96,7 @@ void EditorModel::setSelectedBand (int band)
 
 void EditorModel::resetBand (int band)
 {
+    state::UndoHistory::Scope action (getUndo());
     for (int p = 0; p < params::kNumBandParams; ++p)
     {
         const auto bp = (BandParam) p;
@@ -102,8 +111,19 @@ void EditorModel::resetBand (int band)
     }
 }
 
+void EditorModel::resetBandKeepFrequency (int band)
+{
+    if (band < 0)
+        return;
+    state::UndoHistory::Scope action (getUndo());
+    const auto f = get (band, BandParam::Freq);
+    resetBand (band);
+    set (band, BandParam::Freq, f);
+}
+
 int EditorModel::createBand (double freqHz, double gainDb, dsp::FilterType t)
 {
+    state::UndoHistory::Scope action (getUndo());
     for (int b = 0; b < dsp::kNumBands; ++b)
     {
         if (isUsed (b))
@@ -124,7 +144,7 @@ void EditorModel::deleteBand (int band)
 {
     if (band < 0)
         return;
-    set (band, BandParam::Used, 0.0f);
+    set (band, BandParam::Used, 0.0f); // one action; the band's settings stay in place for undo
     if (processor.getAuditionBand() == band)
         processor.setAuditionBand (-1);
     if (selected == band)

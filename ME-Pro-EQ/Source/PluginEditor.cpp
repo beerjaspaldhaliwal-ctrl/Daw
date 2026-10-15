@@ -53,6 +53,21 @@ void MEProEQAudioProcessorEditor::resized()
     ui.setProperty ("height", getHeight(), nullptr);
 }
 
+bool MEProEQAudioProcessorEditor::keyPressed (const juce::KeyPress& k)
+{
+    const auto mods = k.getModifiers();
+    if (! mods.isCommandDown())
+        return false;
+    const int code = juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) k.getKeyCode());
+    if (code == 'Z' && ! mods.isShiftDown())
+        header.performUndo();
+    else if (code == 'Z' || code == 'Y')
+        header.performRedo();
+    else
+        return false;
+    return true; // consumed even when there is nothing to undo, so the host does not act on it
+}
+
 void MEProEQAudioProcessorEditor::timerCallback()
 {
     const double now = juce::Time::getMillisecondCounterHiRes();

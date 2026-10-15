@@ -1,5 +1,5 @@
 // ME Pro EQ — ME Audio
-// Input/output sample-peak meters with peak hold, clip indicator and trims.
+// Input/output sample-peak meters with peak hold, clip indicator, trims, level comparison and engine status.
 #pragma once
 
 #include "EditorModel.h"
@@ -42,8 +42,15 @@ private:
     EditorModel& model;
     LevelMeter inMeter { "IN" }, outMeter { "OUT" };
     ValueKnob inTrim { "In Trim" }, outTrim { "Out Trim" };
-    juce::TextButton clipButton { "CLIP" };
-    juce::Label inPeak, outPeak;
+    juce::TextButton clipButton { "CLIP" }, matchButton { "MATCH" };
+    juce::Label inPeak, outPeak, levelTitle, levelDiff, status;
+    float lastDiffDb = 0.0f;
+    bool diffValid = false;
+
+public:
+    // Sets the output trim so that the output RMS (3 s) matches the input RMS. One undoable action.
+    // Returns false when there is no usable level reading (silence).
+    bool matchOutputLevel();
 };
 
 } // namespace mepro::ui

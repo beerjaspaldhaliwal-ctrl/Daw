@@ -79,9 +79,13 @@ void LevelMeter::paint (juce::Graphics& g)
             break;
     }
     g.setFont (font (9.5f));
+    float lastY = -1000.0f;
     for (float db : { 0.0f, -6.0f, -12.0f, -24.0f, -48.0f })
     {
         const float y = dbToY (db, r);
+        if (y - lastY < 11.0f)
+            continue; // not enough room at small window sizes: skip rather than overlap
+        lastY = y;
         g.setColour (db >= 0.0f ? text : textFaint);
         g.drawText (juce::String ((int) db), juce::Rectangle<float> (scale.getX(), y - 6.0f, scale.getWidth(), 12.0f), juce::Justification::centredRight);
     }
@@ -97,8 +101,29 @@ MeterStrip::MeterStrip (EditorModel& m) : model (m)
     addAndMakeVisible (clipButton);
     addAndMakeVisible (inPeak);
     addAndMakeVisible (outPeak);
+    addAndMakeVisible (matchButton);
+    addAndMakeVisible (levelTitle);
+    addAndMakeVisible (levelDiff);
+    addAndMakeVisible (status);
     inTrim.attach (model.globalParam (params::id::inputTrim));
     outTrim.attach (model.globalParam (params::id::outputTrim));
+    inTrim.setUndoHistory (&model.getUndo());
+    outTrim.setUndoHistory (&model.getUndo());
+    matchButton.setTooltip ("Level match: set the output trim so that the output level (RMS over the last ~3 s) equals the "
+                            "input level. Play typical material first. Undoable.");
+    matchButton.onClick = [this] { matchOutputLevel(); };
+    levelTitle.setText ("OUT - IN", juce::dontSendNotification);
+    levelTitle.setTooltip ("Output minus input level, RMS over the last ~3 seconds");
+    levelDiff.setTooltip (levelTitle.getTooltip());
+    for (auto* l : { &levelTitle, &levelDiff, &status })
+    {
+        l->setJustificationType (juce::Justification::centred);
+        l->setColour (juce::Label::textColourId, theme::textDim);
+    }
+    levelTitle.setFont (theme::font (10.0f, true));
+    levelDiff.setFont (theme::font (12.5f, true));
+    status.setFont (theme::font (10.0f));
+    status.setMinimumHorizontalScale (0.7f);
     inTrim.setBipolar (true);
     outTrim.setBipolar (true);
     clipButton.setTooltip ("Output clip indicator (sample peak above 0 dBFS). Click to reset.");
@@ -122,9 +147,45 @@ void MeterStrip::refresh (double dt)
     auto fmt = [] (float db) { return db <= -99.0f ? juce::String ("-inf") : juce::String (db, 1); };
     inPeak.setText (fmt (inMeter.getHeldDb()), juce::dontSendNotification);
     outPeak.setText (fmt (outMeter.getHeldDb()), juce::dontSendNotification);
+    // Level comparison (3 s RMS). Readings below -70 dBFS are treated as silence.
+    const float inDb = e.getInputRmsDb(), outDb = e.getOutputRmsDb();
+    diffValid = inDb > -70.0f && outDb > -100.0f;
+    lastDiffDb = diffValid ? outDb - inDb : 0.0f;
+    levelDiff.setText (diffValid ? (lastDiffDb >= 0.0f ? "+" : "") + juce::String (lastDiffDb, 1) + " dB" : juce::String ("-"),
+                       juce::dontSendNotification);
+    levelDiff.setColour (juce::Label::textColourId, diffValid && std::abs (lastDiffDb) > 0.5f ? theme::accent : theme::textDim);
+    matchButton.setEnabled (diffValid && std::abs (lastDiffDb) > 0.05f);
+
+    // Engine status: sample rate, channels, latency, recovered numeric faults.
+    auto& p = model.getProcessor();
+    const double fs = p.getSampleRateForUi();
+    const int lat = p.getLatencySamples();
+    juce::String s;
+    s << juce::String (fs / 1000.0, 1) << " kHz " << (ch == 1 ? "mono" : "stereo") << "\nlatency " << lat << " smp";
+    if (e.getNonFiniteEvents() > 0)
+        s << "\n! " << e.getNonFiniteEvents() << " faults fixed";
+    status.setText (s, juce::dontSendNotification);
+    status.setColour (juce::Label::textColourId, e.getNonFiniteEvents() > 0 ? theme::danger : theme::textFaint);
+    status.setTooltip ("Latency reported to the host: " + juce::String (lat) + " samples ("
+                       + juce::String (1000.0 * lat / juce::jmax (1.0, fs), 2) + " ms)");
+
     const bool clipped = e.hasClipped();
     clipButton.setColour (juce::TextButton::buttonColourId, clipped ? theme::danger : theme::panelRaised);
     clipButton.setColour (juce::TextButton::textColourOffId, clipped ? juce::Colours::white : theme::textFaint);
+}
+
+bool MeterStrip::matchOutputLevel()
+{
+    if (! diffValid)
+        return false;
+    auto* trim = model.globalParam (params::id::outputTrim);
+    const float current = trim->convertFrom0to1 (trim->getValue());
+    const float target = juce::jlimit ((float) dsp::EQEngine::kTrimMinDb, (float) dsp::EQEngine::kTrimMaxDb, current - lastDiffDb);
+    state::UndoHistory::Scope action (model.getUndo());
+    trim->beginChangeGesture();
+    trim->setValueNotifyingHost (trim->convertTo0to1 (target));
+    trim->endChangeGesture();
+    return true;
 }
 
 void MeterStrip::paint (juce::Graphics& g)
@@ -139,9 +200,16 @@ void MeterStrip::resized()
     auto r = getLocalBounds().reduced (8, 8);
     clipButton.setBounds (r.removeFromTop (22));
     r.removeFromTop (6);
-    auto knobs = r.removeFromBottom (150);
-    inTrim.setBounds (knobs.removeFromTop (75));
+    status.setBounds (r.removeFromBottom (40)); // up to three lines
+    r.removeFromBottom (4);
+    auto knobs = r.removeFromBottom (juce::jlimit (120, 150, r.getHeight() / 3));
+    inTrim.setBounds (knobs.removeFromTop (knobs.getHeight() / 2));
     outTrim.setBounds (knobs);
+    r.removeFromBottom (4);
+    matchButton.setBounds (r.removeFromBottom (22));
+    levelDiff.setBounds (r.removeFromBottom (16));
+    levelTitle.setBounds (r.removeFromBottom (13));
+    r.removeFromBottom (6);
     auto peaks = r.removeFromBottom (16);
     inPeak.setBounds (peaks.removeFromLeft (peaks.getWidth() / 2));
     outPeak.setBounds (peaks);

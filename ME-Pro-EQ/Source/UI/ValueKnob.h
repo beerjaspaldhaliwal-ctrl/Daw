@@ -3,7 +3,11 @@
 //   drag (vertical or horizontal)  : adjust          Shift + drag / wheel : fine adjust (x0.1)
 //   double-click                   : type a value    Ctrl/Cmd/Alt + click : reset to default
 //   arrow keys (when focused)      : step            mouse wheel          : adjust
+// With an undo history attached, every edit (a whole drag, a typed value, one wheel/key step) is one undoable
+// action.
 #pragma once
+
+#include "State/UndoHistory.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -18,6 +22,7 @@ public:
     ~ValueKnob() override;
 
     void attach (juce::RangedAudioParameter* parameter);
+    void setUndoHistory (state::UndoHistory* h) noexcept { undo = h; }
     void setColour (juce::Colour c) { accent = c; repaint(); }
     void setBipolar (bool b) { bipolar = b; repaint(); }
 
@@ -39,6 +44,7 @@ public:
 private:
     void showEditor();
     void commitEditor();
+    void finishDrag();
     juce::Rectangle<float> knobArea() const;
 
     juce::String label;
@@ -52,6 +58,8 @@ private:
     bool bipolar = false;
     juce::Colour accent { 0xfff2b544 };
     std::unique_ptr<juce::TextEditor> editor;
+    state::UndoHistory* undo = nullptr;
+    bool undoOpen = false;
 };
 
 } // namespace mepro::ui

@@ -8,11 +8,11 @@ zero-latency minimum-phase engine.
 
 | Area | What it does |
 |---|---|
-| Header | ME Audio mark, engine status (sample rate, channel layout, latency), **MONO** (mono-compatibility listening, never rendered), **BYPASS** (host-automatable global bypass). |
+| Header | **UNDO / REDO**, preset browser (**<** name **>** **SAVE**), **A / B** comparison with copy, **AUTO GAIN**, **MONO** (mono-compatibility listening, never rendered), **BYPASS** (host-automatable global bypass). |
 | Graph | Frequency response of every band and the combined response; real-time spectrum (input = dark line, output = filled). |
 | Band strip | 16 band slots. Coloured = band exists (dim = switched off). Click an empty slot to create a band there. A dot marks bands with dynamics enabled. |
 | Band panel | All settings of the selected band, including the dynamic section. |
-| Meters | Input and output sample-peak meters (peak hold 1.5 s), clip indicator (click to reset), input and output trim (±24 dB). |
+| Meters | Input and output sample-peak meters (peak hold 1.5 s), clip indicator (click to reset), **OUT − IN** level difference with **MATCH**, input and output trim (±24 dB), engine status (sample rate, channel layout, latency reported to the host). |
 
 ## Working in the graph
 
@@ -49,14 +49,16 @@ Parameter values are stored with full floating-point precision in your project.
 |---|---|---|
 | Bell | Freq, Gain, Q | Symmetric boost/cut; Q relates to the bandwidth between the half-gain points: 1/Q = 2·sinh(ln2/2 · BW) |
 | Low shelf / High shelf | Freq, Gain, Q, Slope 6–48 dB/oct | Freq is the shelf midpoint (half the gain). Q > 0.71 adds a resonant bump (12 dB/oct), Q is limited to 4 |
-| High pass / Low pass | Freq, Q, Slope 6–96 dB/oct | Butterworth at Q 0.71 (−3.01 dB at Freq). Other Q values add/remove resonance on the most resonant section (limited to Q 10) |
+| High pass / Low pass | Freq, Q, Slope 6–96 dB/oct | Butterworth at Q 0.71: exactly −3.01 dB at Freq, no pass-band ripple or overshoot at any frequency. Other Q values add/remove resonance on the most resonant section (limited to Q 10) |
 | Notch | Freq, Q | Infinite depth at Freq |
 | Band pass | Freq, Q | 0 dB at Freq |
 | Tilt | Freq (pivot), Gain, Slope 6–48 dB/oct | Gain is the total tilt: −Gain/2 at low frequencies, +Gain/2 at high frequencies, 0 dB at the pivot. The node sits at the +Gain/2 high-frequency plateau |
 | All pass | Freq, Q | Phase only: −180° at Freq, magnitude flat |
 
 Frequencies above 0.49 × sample rate (e.g. 21.6 kHz at 44.1 kHz) are designed at that limit; the graph shows
-the response actually in use.
+the response actually in use. Bells and shelves set above about a quarter of the sample rate (11–12 kHz at
+44.1/48 kHz) keep their shape (no overshoot) but are narrower/steeper than an ideal analog curve; running
+the project at 88.2/96 kHz reduces this. Measured figures: `Documentation/DSP_Design.md`.
 
 ## Stereo routing
 
@@ -87,9 +89,10 @@ band panel — both read the value the audio engine is applying.
 Dynamic processing updates the filter every 8 samples at 44.1/48 kHz (0.17 ms) with per-sample
 interpolation in between.
 
-**External sidechain in FL Studio:** route the key track to the mixer track that holds ME Pro EQ (right-click
-the routing arrow → "Sidechain to this track"), then in the plugin's wrapper menu open *Processing* and set
-the sidechain input. If the host sends no sidechain signal while External is selected, the detector hears
+**External sidechain in FL Studio** (follows FL Studio's documented sidechain workflow; not yet verified
+by us inside FL Studio): route the key track to the mixer track that holds ME Pro EQ (right-click the
+routing arrow → "Sidechain to this track"), then in the plugin wrapper's settings (*Processing* tab) map
+that sidechain input to the plugin's sidechain bus. If the host sends no sidechain signal while External is selected, the detector hears
 silence and the band panel shows a warning.
 
 ## Audition (solo) and mono check
@@ -124,6 +127,58 @@ Input and output trim: ±24 dB, smoothed. The clip indicator lights when an outp
 Global bypass crossfades (20 ms) to the untouched input; when fully bypassed the output is the input,
 bit for bit. The engine is minimum-phase with **zero latency** in this version.
 
+## Auto gain and level matching
+
+Louder usually sounds "better", which makes EQ decisions unreliable. Two tools help you compare at equal
+loudness:
+
+- **AUTO GAIN** (header, host-automatable, saved with the project): offsets the output by the estimated
+  loudness change of the current EQ curve. The estimate weights the curve like pink noise between 20 Hz
+  and 20 kHz. It follows the static curve only; dynamic EQ movements are not compensated. The applied
+  value is shown on the button (e.g. *AUTO −1.4 dB*). For material far from pink noise (an isolated 808,
+  a hi-hat) the estimate is less accurate — use MATCH instead.
+- **OUT − IN** and **MATCH** (meter strip): the difference between output and input level, measured as
+  RMS over about the last 3 seconds of audio. Play typical material, then click MATCH: the output trim is
+  set so the difference becomes 0 dB. MATCH is one undoable step. When the input is silent the readout
+  shows "−" and MATCH is disabled.
+
+## Undo / redo
+
+Every change you make in the ME Pro EQ window can be undone: **UNDO / REDO** in the header, or **Ctrl+Z**,
+**Ctrl+Shift+Z** / **Ctrl+Y** while the plugin window has keyboard focus (in some hosts the host's own
+shortcut handling takes priority; the buttons always work).
+
+- A whole drag is one step; creating, resetting or deleting a band is one step; loading a preset is one
+  step.
+- Up to 100 steps are kept. Host automation and changes made through the host's generic controls are not
+  recorded.
+- Loading a project starts with an empty history. A/B slots each have their own history (see below).
+
+## A/B comparison
+
+**A** and **B** hold two complete settings (everything except global bypass). The first time you click
+**B**, it starts as a copy of A; from then on the two are independent. **A > B** (or **B > A**) copies the
+active slot into the other one; it is enabled only while the slots differ. Both slots are saved with your
+project.
+
+Each slot keeps its own undo history, so UNDO in slot B only steps back through changes made in B. Switching
+slots is not itself an undo step and is not possible in the middle of a drag.
+
+## Presets
+
+The preset name in the header opens the browser; **<** and **>** step through the list.
+
+- **Factory presets** (35, read-only, built into the plugin) in six categories: Vocals, Drums, Bass,
+  Instruments, Punjabi Production (dhol, dholak, tabla, tumbi, harmonium, bansuri) and Bus Processing.
+  They are starting points for typical sources — always adjust frequencies and amounts by ear for your
+  material; no preset can suit every recording.
+- **User presets**: **SAVE** stores the current settings under a name of your choice (factory names are
+  reserved). Files are kept in `Documents\ME Audio\ME Pro EQ\Presets` as `.mepreset` (XML); you can copy
+  them between computers. The browser's menu can delete the loaded user preset and open the folder.
+- A preset contains every setting except global bypass, including the trims and auto gain.
+- A `*` after the name means the settings were changed after loading. Loading a preset is one undoable
+  step, so you can always get back to what you had.
+
 ## Precision and safety
 
 - All processing is 64-bit floating point internally (the host may run the plugin in 32- or 64-bit).
@@ -134,6 +189,8 @@ bit for bit. The engine is minimum-phase with **zero latency** in this version.
 
 ## Known limitations of this version
 
-- Linear-phase mode, presets, A/B comparison and undo/redo are not available yet.
-- FL Studio compatibility has been verified with automated host tests (pluginval, Steinberg validator) —
-  see `Documentation/ValidationReport.md` for exactly what was and was not tested.
+- No linear-phase mode yet (planned). The engine is minimum phase with zero latency.
+- No intelligent analysis suggestions yet (planned).
+- ME Pro EQ has **not yet been tested inside FL Studio**. It passes pluginval (strictness 10) and the
+  Steinberg VST3 validator, which exercise the same VST3 interface FL Studio uses, but those tools are not
+  FL Studio. `Documentation/ValidationReport.md` lists exactly what was and was not tested.

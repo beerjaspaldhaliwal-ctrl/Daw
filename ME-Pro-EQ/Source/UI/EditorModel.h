@@ -1,10 +1,14 @@
 // ME Pro EQ — ME Audio
 // Editor-side access to the band parameters: reading real-unit values, host-gesture-correct writes,
 // band selection and band creation/deletion. Message thread only.
+//
+// Every write made through the model is one undoable action (a whole drag is one action; composite
+// operations such as "create band" or "reset band" are one action as well).
 #pragma once
 
 #include "DSP/FilterDesign.h"
 #include "State/ParameterLayout.h"
+#include "State/UndoHistory.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -22,6 +26,7 @@ public:
 
     MEProEQAudioProcessor& getProcessor() noexcept { return processor; }
     juce::AudioProcessorValueTreeState& getState() noexcept { return state; }
+    state::UndoHistory& getUndo() noexcept;
 
     juce::RangedAudioParameter* param (int band, BandParam p) const;
     juce::RangedAudioParameter* globalParam (const char* id) const;
@@ -49,6 +54,7 @@ public:
     int createBand (double freqHz, double gainDb, dsp::FilterType type);
     void deleteBand (int band);
     void resetBand (int band); // restore every setting except existence to its default
+    void resetBandKeepFrequency (int band);
     void toggleBand (int band);
 
     struct Listener

@@ -145,19 +145,13 @@ BandPanel::BandPanel (EditorModel& m) : model (m)
         const int b = model.getSelectedBand();
         p.setAuditionBand (soloButton.getToggleState() && b >= 0 ? b : -1);
     };
-    resetButton.onClick = [this]
-    {
-        const int b = model.getSelectedBand();
-        if (b < 0)
-            return;
-        const auto f = model.get (b, BandParam::Freq);
-        model.resetBand (b);
-        model.set (b, BandParam::Freq, f);
-    };
+    resetButton.onClick = [this] { model.resetBandKeepFrequency (model.getSelectedBand()); };
     deleteButton.onClick = [this] { model.deleteBand (model.getSelectedBand()); };
 
     gainKnob.setBipolar (true);
     rangeKnob.setBipolar (true);
+    for (auto* k : { &freqKnob, &gainKnob, &qKnob, &thrKnob, &ratioKnob, &attKnob, &relKnob, &rangeKnob })
+        k->setUndoHistory (&model.getUndo());
     title.setFont (theme::font (14.0f, true));
     hint.setFont (theme::font (14.0f));
     hint.setColour (juce::Label::textColourId, theme::textDim);
@@ -209,13 +203,14 @@ void BandPanel::rebind()
 
     auto& st = model.getState();
     auto id = [b] (BandParam p) { return params::bandParamId (b, p); };
-    typeAtt = std::make_unique<juce::ComboBoxParameterAttachment> (*st.getParameter (id (BandParam::Type)), typeBox);
-    slopeAtt = std::make_unique<juce::ComboBoxParameterAttachment> (*st.getParameter (id (BandParam::Slope)), slopeBox);
-    stereoAtt = std::make_unique<juce::ComboBoxParameterAttachment> (*st.getParameter (id (BandParam::Stereo)), stereoBox);
-    detAtt = std::make_unique<juce::ComboBoxParameterAttachment> (*st.getParameter (id (BandParam::Detector)), detBox);
-    scAtt = std::make_unique<juce::ComboBoxParameterAttachment> (*st.getParameter (id (BandParam::Sidechain)), scBox);
-    powerAtt = std::make_unique<juce::ButtonParameterAttachment> (*st.getParameter (id (BandParam::On)), powerButton);
-    dynAtt = std::make_unique<juce::ButtonParameterAttachment> (*st.getParameter (id (BandParam::DynOn)), dynButton);
+    auto& u = model.getUndo();
+    typeAtt = std::make_unique<ComboBinding> (*st.getParameter (id (BandParam::Type)), typeBox, u);
+    slopeAtt = std::make_unique<ComboBinding> (*st.getParameter (id (BandParam::Slope)), slopeBox, u);
+    stereoAtt = std::make_unique<ComboBinding> (*st.getParameter (id (BandParam::Stereo)), stereoBox, u);
+    detAtt = std::make_unique<ComboBinding> (*st.getParameter (id (BandParam::Detector)), detBox, u);
+    scAtt = std::make_unique<ComboBinding> (*st.getParameter (id (BandParam::Sidechain)), scBox, u);
+    powerAtt = std::make_unique<ToggleBinding> (*st.getParameter (id (BandParam::On)), powerButton, u);
+    dynAtt = std::make_unique<ToggleBinding> (*st.getParameter (id (BandParam::DynOn)), dynButton, u);
 
     freqKnob.attach (st.getParameter (id (BandParam::Freq)));
     gainKnob.attach (st.getParameter (id (BandParam::Gain)));

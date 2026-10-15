@@ -19,10 +19,24 @@ ValueKnob::ValueKnob (juce::String labelText) : label (std::move (labelText))
     setTitle (label);
 }
 
-ValueKnob::~ValueKnob() = default;
+ValueKnob::~ValueKnob()
+{
+    finishDrag();
+}
+
+void ValueKnob::finishDrag()
+{
+    if (dragging && attachment != nullptr)
+        attachment->endGesture();
+    dragging = false;
+    if (undoOpen && undo != nullptr)
+        undo->end();
+    undoOpen = false;
+}
 
 void ValueKnob::attach (juce::RangedAudioParameter* p)
 {
+    finishDrag();
     if (editor != nullptr)
         editor.reset();
     attachment.reset();
@@ -118,9 +132,17 @@ void ValueKnob::setNormalised (float norm, bool asGesture)
         return;
     const float v = param->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, norm));
     if (asGesture)
+    {
+        if (undo != nullptr)
+            undo->begin();
         attachment->setValueAsCompleteGesture (v);
+        if (undo != nullptr)
+            undo->end();
+    }
     else
+    {
         attachment->setValueAsPartOfGesture (v);
+    }
 }
 
 void ValueKnob::mouseDown (const juce::MouseEvent& e)
@@ -137,6 +159,11 @@ void ValueKnob::mouseDown (const juce::MouseEvent& e)
     dragFine = e.mods.isShiftDown();
     dragStart = e.position;
     dragStartNorm = param->convertTo0to1 (value);
+    if (undo != nullptr && ! undoOpen)
+    {
+        undo->begin();
+        undoOpen = true;
+    }
     attachment->beginGesture();
 }
 
@@ -166,9 +193,7 @@ void ValueKnob::mouseDrag (const juce::MouseEvent& e)
 
 void ValueKnob::mouseUp (const juce::MouseEvent&)
 {
-    if (dragging && attachment != nullptr)
-        attachment->endGesture();
-    dragging = false;
+    finishDrag();
 }
 
 void ValueKnob::mouseDoubleClick (const juce::MouseEvent&)
