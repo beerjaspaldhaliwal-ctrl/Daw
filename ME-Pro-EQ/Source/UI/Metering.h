@@ -5,6 +5,7 @@
 #include "EditorModel.h"
 #include "ValueKnob.h"
 
+#include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace mepro::ui
@@ -43,6 +44,8 @@ private:
     LevelMeter inMeter { "IN" }, outMeter { "OUT" };
     ValueKnob inTrim { "In Trim" }, outTrim { "Out Trim" };
     juce::TextButton clipButton { "CLIP" }, matchButton { "MATCH" };
+    juce::ComboBox phaseBox, qualityBox;
+    std::unique_ptr<juce::ComboBoxParameterAttachment> phaseAtt, qualityAtt;
     juce::Label inPeak, outPeak, levelTitle, levelDiff, status;
     float lastDiffDb = 0.0f;
     bool diffValid = false;

@@ -173,9 +173,10 @@ void EQGraph::recomputeCurves()
 void EQGraph::recomputeDynamicCurves()
 {
     auto& engine = model.getProcessor().getEngine();
+    const bool dynamicsRun = ! engine.isUsingLinearPhase(); // linear phase applies static settings only
     for (int b = 0; b < dsp::kNumBands; ++b)
     {
-        const bool candidate = model.isActive (b) && model.get (b, BandParam::DynOn) > 0.5f
+        const bool candidate = dynamicsRun && model.isActive (b) && model.get (b, BandParam::DynOn) > 0.5f
                             && dsp::typeSupportsDynamics (model.type (b));
         const float g = candidate ? engine.getBandDynamicGainDb (b) : 0.0f;
         bandDynGain[(size_t) b] = g;
@@ -212,11 +213,45 @@ void EQGraph::refresh()
         recomputeCurves();
     }
     recomputeDynamicCurves();
+    updateLinearPhaseCurves();
 
     const auto p = plotArea();
     spectrum.update (sampleRate, juce::jlimit (64, 1200, (int) (p.getWidth() / 2.0f)), fMin, fMax, 1.0 / 30.0);
     lastAudition = model.getProcessor().getAuditionBand();
     repaint();
+}
+
+void EQGraph::updateLinearPhaseCurves()
+{
+    const auto* lp = model.getProcessor().getEngine().getLinearPhaseForUi();
+    linearPhase = lp != nullptr;
+    if (lp == nullptr)
+    {
+        lpVersion = 0;
+        return;
+    }
+    dsp::LinearPhaseEngine::RealisedResponse r;
+    if (! lp->getRealisedResponse (r) || (r.version == lpVersion && lpCurveA.size() == freqs.size()))
+        return;
+    lpVersion = r.version;
+    auto sample = [this, &r] (const std::vector<float>& bins, std::vector<float>& out)
+    {
+        out.resize (freqs.size());
+        for (size_t i = 0; i < freqs.size(); ++i)
+        {
+            const double k = freqs[i] / r.binHz;
+            const auto k0 = (size_t) juce::jlimit (0.0, (double) bins.size() - 2.0, std::floor (k));
+            const float t = (float) juce::jlimit (0.0, 1.0, k - (double) k0);
+            out[i] = bins[k0] + t * (bins[k0 + 1] - bins[k0]);
+        }
+    };
+    sample (r.domainA, lpCurveA);
+    if (! r.domainB.empty())
+        sample (r.domainB, lpCurveB);
+    else
+        lpCurveB.clear();
+    lpNameA = r.nameA;
+    lpNameB = r.nameB;
 }
 
 juce::Path EQGraph::makePath (const std::vector<float>& db) const
@@ -392,6 +427,34 @@ void EQGraph::paint (juce::Graphics& g)
             g.setColour (curve);
             g.strokePath (main, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
+
+        // Linear phase: the response of the FIR filter actually running (dashed). It departs from the
+        // designed curve where the FIR is too short for steep / narrow low-frequency settings.
+        if (linearPhase && lpCurveA.size() == freqs.size())
+        {
+            const float dashes[] = { 5.0f, 3.0f };
+            auto drawDashed = [&g, &dashes, this] (const std::vector<float>& db, juce::Colour c)
+            {
+                juce::Path dashed;
+                juce::PathStrokeType (1.6f).createDashedStroke (dashed, makePath (db), dashes, 2);
+                g.setColour (c);
+                g.fillPath (dashed);
+            };
+            auto colourFor = [] (char n)
+            {
+                switch (n)
+                {
+                    case 'L': return leftCurve;
+                    case 'R': return rightCurve;
+                    case 'M': return midCurve;
+                    case 'S': return sideCurve;
+                    default:  return accent;
+                }
+            };
+            drawDashed (lpCurveA, colourFor (lpNameA));
+            if (lpCurveB.size() == freqs.size())
+                drawDashed (lpCurveB, colourFor (lpNameB));
+        }
     }
 
     // Nodes
@@ -479,6 +542,16 @@ void EQGraph::drawReadouts (juce::Graphics& g, juce::Rectangle<float> p)
         g.setColour (juce::Colour (0xff15110a));
         g.setFont (font (12.5f, true));
         g.drawText (s, r, juce::Justification::centred);
+    }
+
+    if (linearPhase)
+    {
+        const int lat = model.getProcessor().getEngine().getLatencySamples();
+        const juce::String s = "LINEAR PHASE   " + juce::String (1000.0 * lat / sampleRate, 0) + " ms latency   dashed = realised FIR response"
+                             + "   dynamic EQ inactive";
+        g.setFont (font (11.5f, true));
+        g.setColour (accent.withAlpha (0.9f));
+        g.drawText (s, juce::Rectangle<float> (p.getX() + 8.0f, p.getY() + 22.0f, p.getWidth() - 16.0f, 16.0f), juce::Justification::centredLeft);
     }
 
     int usedCount = 0;

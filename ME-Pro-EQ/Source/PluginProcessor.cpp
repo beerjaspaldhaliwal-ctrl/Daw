@@ -22,20 +22,86 @@ MEProEQAudioProcessor::MEProEQAudioProcessor()
     engine.setAnalyzerTaps (&preTap, &postTap);
     // Prepare with defaults so that a host calling process() before prepareToPlay() is still safe.
     engine.prepare (48000.0, 512, 2);
+    startTimerHz (20);
 }
 
-MEProEQAudioProcessor::~MEProEQAudioProcessor() = default;
+MEProEQAudioProcessor::~MEProEQAudioProcessor()
+{
+    stopTimer();
+}
+
+bool MEProEQAudioProcessor::linearPhaseRequested() const noexcept
+{
+    return apvts.getRawParameterValue (params::id::phaseMode)->load() > 0.5f;
+}
+
+int MEProEQAudioProcessor::linearPhaseQuality() const noexcept
+{
+    return juce::jlimit (0, dsp::kNumLinearPhaseQualities - 1,
+                         (int) std::lround (apvts.getRawParameterValue (params::id::lpQuality)->load()));
+}
+
+int MEProEQAudioProcessor::getTargetLatencySamples() const noexcept
+{
+    return linearPhaseRequested() ? dsp::linearPhaseGeometry (preparedRate, linearPhaseQuality()).latency : 0;
+}
 
 void MEProEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     const int channels = juce::jlimit (1, 2, getMainBusNumInputChannels());
-    engine.prepare (sampleRate, juce::jmax (1, samplesPerBlock), channels);
+    engine.prepare (sampleRate, juce::jmax (1, samplesPerBlock), channels); // also drops any linear-phase engine
+    preparedRate = sampleRate;
+    preparedChannels = channels;
+    prepared = true;
+    lpInstalled = false;
+    lpInstalledQuality = -1;
     reader.read (settings);
     engine.setSettings (settings);
-    engine.reset(); // start in the settled state of the current parameters (no fade-in on load)
-    setLatencySamples (engine.getLatencySamples());
+    if (linearPhaseRequested())
+    {
+        // Built and designed synchronously here, so playback and offline renders start fully processed.
+        const int q = linearPhaseQuality();
+        engine.installLinearPhaseNow (std::make_unique<dsp::LinearPhaseEngine> (sampleRate, q));
+        lpInstalled = true;
+        lpInstalledQuality = q;
+    }
+    else
+    {
+        engine.reset(); // start in the settled state of the current parameters (no fade-in on load)
+    }
+    setLatencySamples (getTargetLatencySamples());
     uiSampleRate.store (sampleRate);
     mainChannels.store (channels);
+}
+
+void MEProEQAudioProcessor::maintainLinearPhase()
+{
+    engine.collectGarbage();
+    if (! prepared)
+        return;
+    if (linearPhaseRequested())
+    {
+        const int q = linearPhaseQuality();
+        if (! lpInstalled || lpInstalledQuality != q)
+        {
+            auto lp = std::make_unique<dsp::LinearPhaseEngine> (preparedRate, q);
+            dsp::EngineSettings now;
+            reader.read (now);
+            lp->setBands (now.bands, preparedChannels, true); // designed before the hand-over
+            engine.installLinearPhase (std::move (lp));
+            lpInstalled = true;
+            lpInstalledQuality = q;
+        }
+    }
+    else if (lpInstalled)
+    {
+        engine.removeLinearPhase();
+        lpInstalled = false;
+        lpInstalledQuality = -1;
+    }
+    const int target = getTargetLatencySamples();
+    if (getLatencySamples() != target)
+        setLatencySamples (target);
 }
 
 void MEProEQAudioProcessor::releaseResources() {}
@@ -67,6 +133,7 @@ void MEProEQAudioProcessor::processInternal (juce::AudioBuffer<SampleType>& buff
 
     // Monitoring functions must never end up in a bounce/export.
     const bool offline = isNonRealtime();
+    engine.setNonRealtime (offline);
     settings.auditionBand = offline ? -1 : auditionBand.load (std::memory_order_relaxed);
     settings.monoAudition = ! offline && monoAudition.load (std::memory_order_relaxed);
     engine.setSettings (settings);
@@ -121,6 +188,9 @@ double MEProEQAudioProcessor::getTailLengthSeconds() const
         const double q = juce::jmax (0.5f, raw (params::BandParam::Q));
         tail = juce::jmax (tail, 6.9 * q / (juce::MathConstants<double>::pi * f0));
     }
+    // Linear phase: the FIR rings for half its length after the (latency-compensated) input ends.
+    if (linearPhaseRequested())
+        tail += 0.5 * dsp::linearPhaseGeometry (preparedRate, linearPhaseQuality()).firLength / preparedRate;
     return juce::jmin (5.0, tail);
 }
 
@@ -189,6 +259,8 @@ bool MEProEQAudioProcessor::restoreStateTree (const juce::ValueTree& source)
         presets.loadFrom (tree);
         undo.clear();
     }
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        maintainLinearPhase(); // phase mode may have changed: rebuild now rather than on the next timer tick
     return true;
 }
 

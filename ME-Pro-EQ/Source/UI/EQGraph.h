@@ -96,6 +96,13 @@ private:
     std::vector<float> signature;
     int lastAudition = -2;
 
+    // Linear-phase mode: response of the FIR actually running (read from the engine).
+    bool linearPhase = false;
+    unsigned lpVersion = 0;
+    std::vector<float> lpCurveA, lpCurveB;
+    char lpNameA = 'C', lpNameB = ' ';
+    void updateLinearPhaseCurves();
+
     int hoverBand = -1;
     juce::Point<float> mousePos;
     bool mouseInside = false;

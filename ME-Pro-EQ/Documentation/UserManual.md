@@ -1,8 +1,8 @@
 # ME Pro EQ — User Manual
 
 ME Pro EQ is a 16-band equalizer with analog-matched filter curves, dynamic EQ on any bell or shelf band,
-per-band stereo routing (Stereo, Left, Right, Mid, Side), a real-time pre/post spectrum analyser and a
-zero-latency minimum-phase engine.
+per-band stereo routing (Stereo, Left, Right, Mid, Side), a real-time pre/post spectrum analyser, a
+zero-latency minimum-phase engine and an optional linear-phase mode.
 
 ## The screen
 
@@ -12,7 +12,7 @@ zero-latency minimum-phase engine.
 | Graph | Frequency response of every band and the combined response; real-time spectrum (input = dark line, output = filled). |
 | Band strip | 16 band slots. Coloured = band exists (dim = switched off). Click an empty slot to create a band there. A dot marks bands with dynamics enabled. |
 | Band panel | All settings of the selected band, including the dynamic section. |
-| Meters | Input and output sample-peak meters (peak hold 1.5 s), clip indicator (click to reset), **OUT − IN** level difference with **MATCH**, input and output trim (±24 dB), engine status (sample rate, channel layout, latency reported to the host). |
+| Meters | Clip indicator (click to reset), **phase mode** (Min phase / Linear) and linear-phase quality, input and output sample-peak meters (peak hold 1.5 s), **OUT − IN** level difference with **MATCH**, input and output trim (±24 dB), engine status (sample rate, channel layout, latency reported to the host). |
 
 ## Working in the graph
 
@@ -104,7 +104,8 @@ silence and the band panel shows a warning.
 - **MONO** in the header plays (L+R)/2 on both channels for a mono-compatibility check.
 
 Both are monitoring functions: they are never saved with the project, they switch off when the editor is
-closed (audition), and they are **ignored during offline rendering/export**.
+closed (audition), and they are **ignored during offline rendering/export**. In linear-phase mode, audition
+follows the (delayed) output.
 
 ## Spectrum analyser
 
@@ -125,7 +126,32 @@ runs on the user-interface thread, never on the audio thread, and costs nothing 
 
 Input and output trim: ±24 dB, smoothed. The clip indicator lights when an output sample exceeds 0 dBFS.
 Global bypass crossfades (20 ms) to the untouched input; when fully bypassed the output is the input,
-bit for bit. The engine is minimum-phase with **zero latency** in this version.
+bit for bit (in linear-phase mode: the input delayed by the reported latency).
+
+## Phase mode: minimum phase or linear phase
+
+The selector under CLIP in the meter strip chooses how the curve is realised:
+
+- **Min phase** (default): zero latency. Like analog equalizers, frequencies around a boost or cut are
+  shifted in phase. Dynamic EQ works only in this mode.
+- **Linear**: the same magnitude curve without any phase shift between frequencies — useful on buses,
+  parallel or multi-microphone sources where phase alignment matters. The price:
+  - **Latency** (reported to the host, which compensates it): Low latency 91 ms, Balanced 176 ms,
+    High resolution 347 ms at 48/96/192 kHz (about 9 % more at 44.1/88.2/176.4 kHz: 99 / 192 / 377 ms).
+    Not suitable for live input monitoring.
+  - **Low-frequency resolution**: the filter has a finite length, so very steep or very narrow settings
+    below about 100 Hz are smoothed (measured example: a 48 dB/oct high-pass at 30 Hz plus a bell at 60 Hz,
+    Balanced quality, differs by up to 2.4 dB from the designed curve between 20 and 50 Hz, and by less than
+    0.1 dB above 50 Hz). The graph draws the response actually running
+    as a dashed line; choose High resolution if the dashed line departs from the curve where it matters.
+  - **Pre-ringing**: sharp low-frequency features smear energy slightly *before* transients, which can be
+    audible on kick drums and bass. If you hear it, use Min phase.
+  - **Dynamic EQ is inactive**: dynamic bands apply their static settings.
+  - Switching the mode during playback causes a short dropout (the new mode starts from silence).
+
+The phase mode and quality are saved with your project, but are not part of presets, A/B or undo (they
+change the plugin's latency) and cannot be automated. CPU use in Linear mode is higher; see
+`ValidationReport.md`.
 
 ## Auto gain and level matching
 
@@ -189,7 +215,6 @@ The preset name in the header opens the browser; **<** and **>** step through th
 
 ## Known limitations of this version
 
-- No linear-phase mode yet (planned). The engine is minimum phase with zero latency.
 - No intelligent analysis suggestions yet (planned).
 - ME Pro EQ has **not yet been tested inside FL Studio**. It passes pluginval (strictness 10) and the
   Steinberg VST3 validator, which exercise the same VST3 interface FL Studio uses, but those tools are not

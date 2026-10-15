@@ -6,10 +6,10 @@
 namespace mepro::state
 {
 
-ParameterSnapshotter::ParameterSnapshotter (juce::AudioProcessor& p, const juce::String& excludedId)
+ParameterSnapshotter::ParameterSnapshotter (juce::AudioProcessor& p, const juce::StringArray& excludedIds)
 {
     for (auto* prm : p.getParameters())
-        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm); rp != nullptr && rp->paramID != excludedId)
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm); rp != nullptr && ! excludedIds.contains (rp->paramID))
             params.push_back (rp);
 }
 

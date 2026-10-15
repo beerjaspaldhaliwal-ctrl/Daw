@@ -14,14 +14,22 @@
 // Level comparison: input and output RMS (3 s time constant) are published so the UI can show the level
 // difference and offer a one-click, undoable output-trim match.
 //
-// Everything runs in double precision. No allocation, locks or I/O happen in process().
+// Phase mode: minimum phase (the 16 IIR bands, zero latency) or linear phase (LinearPhaseEngine: the same
+// magnitude curve as one FIR system, latency N/2 + P). The linear-phase engine is built on the message
+// thread and handed to the audio thread lock-free; switching between the two paths fades the output out
+// (10 ms), switches at silence and fades back in.
+//
+// Everything runs in double precision. No allocation, locks or I/O happen in process() during real-time
+// operation (offline rendering may design linear-phase filters synchronously).
 #pragma once
 
 #include "DspConfig.h"
 #include "FilterBand.h"
+#include "LinearPhase.h"
 
 #include <array>
 #include <atomic>
+#include <memory>
 #include <vector>
 
 namespace mepro::dsp
@@ -36,6 +44,7 @@ struct EngineSettings
     bool autoGain = false;     // compensate the EQ curve's static loudness change (see AutoGain notes below)
     int auditionBand = -1;     // monitoring only: >= 0 solos that band's frequency region
     bool monoAudition = false; // monitoring only: fold output to mono
+    PhaseMode phaseMode = PhaseMode::Minimum; // takes effect once a LinearPhaseEngine is installed
 };
 
 // Receives audio for analysis. Called on the audio thread: implementations must be wait-free.
@@ -53,6 +62,12 @@ public:
     static constexpr double kTrimSmoothingSec = 0.020;
     static constexpr double kBypassFadeSec = 0.020;
     static constexpr double kAuditionFadeSec = 0.010;
+    static constexpr double kModeFadeSec = 0.010;
+
+    EQEngine() = default;
+    ~EQEngine();
+    EQEngine (const EQEngine&) = delete;
+    EQEngine& operator= (const EQEngine&) = delete;
 
     // Not real-time safe (allocates). Call before processing / on sample-rate or block-size change.
     void prepare (double sampleRate, int maxBlockSize, int numChannels);
@@ -77,7 +92,25 @@ public:
     // use 2x this). 0 = automatic (8 samples at 44.1/48 kHz, scaled with the sample rate).
     void setControlPeriodOverride (int samples) noexcept { controlPeriodOverride = samples; }
 
-    int getLatencySamples() const noexcept { return 0; }
+    //== Linear phase ===========================================================================================
+    // Message thread while audio is stopped (e.g. right after prepare()): installs immediately.
+    void installLinearPhaseNow (std::unique_ptr<LinearPhaseEngine> lp) noexcept;
+    // Message thread while audio runs: handed over lock-free; used from the next block (switching with a fade
+    // if linear phase is already producing audio).
+    void installLinearPhase (std::unique_ptr<LinearPhaseEngine> lp) noexcept;
+    // Message thread: releases the linear-phase engine as soon as it is not producing audio.
+    void removeLinearPhase() noexcept;
+    // Message thread: deletes engines the audio thread has retired. Call regularly (e.g. from a timer).
+    void collectGarbage() noexcept;
+    // Offline rendering: linear-phase filters are designed synchronously, so renders are deterministic.
+    void setNonRealtime (bool b) noexcept { nonRealtime = b; }
+
+    // Latency of the path currently producing audio (0 in minimum-phase mode).
+    int getLatencySamples() const noexcept { return currentLatency.load (std::memory_order_relaxed); }
+    bool isUsingLinearPhase() const noexcept { return usingLinearForUi.load (std::memory_order_relaxed); }
+    // The linear-phase engine producing audio, or nullptr. Message thread only; valid until the next
+    // collectGarbage() call (which also runs on the message thread).
+    const LinearPhaseEngine* getLinearPhaseForUi() const noexcept { return lpForUi.load (std::memory_order_acquire); }
     int getControlPeriod() const noexcept { return controlPeriod; }
     double getSampleRate() const noexcept { return sampleRate; }
 
@@ -101,6 +134,9 @@ public:
 
 private:
     void processInterleaved (int numChannels, int n, const double* scInterleaved, int scChannels) noexcept;
+    void updatePhaseMode (int numChannels) noexcept;
+    void retire (LinearPhaseEngine* e) noexcept;
+    void deleteAllLinearPhase() noexcept;
     void applyAudition (int numChannels, int n) noexcept;
     static void storeMax (std::atomic<float>& a, float v) noexcept;
 
@@ -142,6 +178,20 @@ private:
     std::atomic<float> autoGainForUi { 0.0f };
     double msIn = 0.0, msOut = 0.0;
     std::atomic<float> inRmsDb { -200.0f }, outRmsDb { -200.0f };
+
+    // Linear phase (see LinearPhase.h)
+    LinearPhaseEngine* lpActive = nullptr; // audio thread
+    LinearPhaseEngine* lpNext = nullptr;   // audio thread: replacement waiting for a silent point
+    std::atomic<LinearPhaseEngine*> lpIncoming { nullptr };
+    std::atomic<LinearPhaseEngine*> lpRetired { nullptr };
+    std::atomic<const LinearPhaseEngine*> lpForUi { nullptr };
+    std::atomic<bool> lpRemoveRequest { false };
+    bool usingLinear = false;
+    bool nonRealtime = false;
+    int modeFadePos = 480, modeFadeLen = 480, modeFadeDir = 0; // output gain = fadeShape(pos / len)
+    int modeHold = 0; // samples to stay silent before fading in (the new path's latency)
+    std::atomic<int> currentLatency { 0 };
+    std::atomic<bool> usingLinearForUi { false };
 
     std::array<std::atomic<float>, 2> inPeak { 0.0f, 0.0f };
     std::array<std::atomic<float>, 2> outPeak { 0.0f, 0.0f };

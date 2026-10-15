@@ -14,7 +14,7 @@
 
 #include <atomic>
 
-class MEProEQAudioProcessor final : public juce::AudioProcessor
+class MEProEQAudioProcessor final : public juce::AudioProcessor, private juce::Timer
 {
 public:
     static constexpr int kStateVersion = 1;
@@ -82,12 +82,21 @@ public:
     mepro::state::PresetManager& getPresets() noexcept { return presets; }
     juce::CriticalSection& getStateLock() noexcept { return stateLock; }
 
+    // Message thread: builds / releases the linear-phase engine for the current phase-mode parameters and
+    // reports the resulting latency to the host. Runs from a timer, after prepareToPlay and after state loads.
+    void maintainLinearPhase();
+    int getTargetLatencySamples() const noexcept;
+
 private:
     template <typename SampleType>
     void processInternal (juce::AudioBuffer<SampleType>& buffer);
+    void timerCallback() override { maintainLinearPhase(); }
+    bool linearPhaseRequested() const noexcept;
+    int linearPhaseQuality() const noexcept;
 
     juce::AudioProcessorValueTreeState apvts;
-    mepro::state::ParameterSnapshotter snapshotter { *this, mepro::params::id::bypass };
+    mepro::state::ParameterSnapshotter snapshotter { *this, { mepro::params::id::bypass, mepro::params::id::phaseMode,
+                                                              mepro::params::id::lpQuality } };
     mepro::state::UndoHistory undo { snapshotter };
     mepro::state::ABComparison ab { snapshotter, undo };
     mepro::state::PresetManager presets { snapshotter, undo };
@@ -110,6 +119,13 @@ private:
     std::atomic<bool> monoAudition { false };
     std::atomic<double> uiSampleRate { 48000.0 };
     std::atomic<bool> sidechainAvailable { false };
+
+    // Linear-phase bookkeeping (message thread)
+    bool prepared = false;
+    double preparedRate = 48000.0;
+    int preparedChannels = 2;
+    bool lpInstalled = false;
+    int lpInstalledQuality = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MEProEQAudioProcessor)
 };

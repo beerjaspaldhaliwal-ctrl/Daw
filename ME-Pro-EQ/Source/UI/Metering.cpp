@@ -102,6 +102,21 @@ MeterStrip::MeterStrip (EditorModel& m) : model (m)
     addAndMakeVisible (inPeak);
     addAndMakeVisible (outPeak);
     addAndMakeVisible (matchButton);
+    addAndMakeVisible (phaseBox);
+    addAndMakeVisible (qualityBox);
+    phaseBox.addItemList ({ "Min phase", "Linear" }, 1);
+    for (int q = 0; q < dsp::kNumLinearPhaseQualities; ++q)
+    {
+        const auto g = dsp::linearPhaseGeometry (48000.0, q);
+        qualityBox.addItem (juce::String (g.firLength / 1024) + "k taps", q + 1);
+    }
+    phaseBox.setTooltip ("Phase mode. Min phase: zero latency, analog-like phase. Linear: no phase shift between frequencies; "
+                         "adds latency (reported to the host) and pre-ringing on steep or narrow low-frequency settings. "
+                         "Dynamic EQ is inactive in linear-phase mode. Not part of presets, A/B or undo.");
+    qualityBox.setTooltip ("Linear-phase FIR length: longer = more accurate low frequencies, more latency and CPU "
+                           "(taps shown for 44.1/48 kHz; they scale with the sample rate).");
+    phaseAtt = std::make_unique<juce::ComboBoxParameterAttachment> (*model.globalParam (params::id::phaseMode), phaseBox);
+    qualityAtt = std::make_unique<juce::ComboBoxParameterAttachment> (*model.globalParam (params::id::lpQuality), qualityBox);
     addAndMakeVisible (levelTitle);
     addAndMakeVisible (levelDiff);
     addAndMakeVisible (status);
@@ -162,6 +177,9 @@ void MeterStrip::refresh (double dt)
     const int lat = p.getLatencySamples();
     juce::String s;
     s << juce::String (fs / 1000.0, 1) << " kHz " << (ch == 1 ? "mono" : "stereo") << "\nlatency " << lat << " smp";
+    if (lat > 0)
+        s << " (" << juce::String (1000.0 * lat / juce::jmax (1.0, fs), 0) << " ms)";
+    qualityBox.setEnabled (phaseBox.getSelectedItemIndex() == 1);
     if (e.getNonFiniteEvents() > 0)
         s << "\n! " << e.getNonFiniteEvents() << " faults fixed";
     status.setText (s, juce::dontSendNotification);
@@ -199,6 +217,10 @@ void MeterStrip::resized()
 {
     auto r = getLocalBounds().reduced (8, 8);
     clipButton.setBounds (r.removeFromTop (22));
+    r.removeFromTop (6);
+    phaseBox.setBounds (r.removeFromTop (22));
+    r.removeFromTop (3);
+    qualityBox.setBounds (r.removeFromTop (22));
     r.removeFromTop (6);
     status.setBounds (r.removeFromBottom (40)); // up to three lines
     r.removeFromBottom (4);

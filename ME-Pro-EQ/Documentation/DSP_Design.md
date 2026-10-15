@@ -5,15 +5,17 @@ from the automated test suite (`meproeq_dsp_tests`, report: `reports/dsp_test_re
 folder). When a number here and the report disagree, the report is the truth and this document is out of
 date.
 
-Version described: 0.1.0 (milestone M2). Engine mode: minimum phase, zero latency. A linear-phase mode is
-planned for M3 and is **not** implemented yet.
+Version described: 0.1.0 (milestone M3, linear-phase part). Two engine modes: minimum phase (zero latency,
+sections 2–6) and linear phase (FIR, section 8).
 
 ## 1. Signal flow
 
 ```
 input ─► sanitize (NaN/Inf → 0) ─► input meter ─► [dry copy] ─► input trim ─► pre-EQ analyser tap
-      ─► band 1 … band 16 (serial) ─► band audition (monitoring) ─► output trim + auto gain
-      ─► bypass crossfade with dry ─► mono fold (monitoring) ─► non-finite guard ─► output meter
+      ─► band 1 … band 16 (serial)  |or|  linear-phase FIR system (dry delayed by the same latency)
+      ─► band audition (monitoring) ─► output trim + auto gain
+      ─► bypass crossfade with dry ─► phase-mode switch fade ─► mono fold (monitoring)
+      ─► non-finite guard ─► output meter
       ─► level RMS ─► post-EQ analyser tap ─► output
 ```
 
@@ -23,8 +25,11 @@ input ─► sanitize (NaN/Inf → 0) ─► input meter ─► [dry copy] ─�
 - Flush-to-zero / denormals-are-zero is enabled for the duration of `processBlock`
   (`Engine.DenormalsDoNotSlowProcessing`: 4 s of 16-band stereo audio takes 0.0179 s with normal input,
   0.0178 s with subnormal input, 0.0189 s with 1e-300 input).
-- Nothing in `processBlock` allocates memory, takes a lock, performs I/O or waits on another thread.
-  Buffers are sized in `prepareToPlay`; the analyser uses a wait-free single-producer/single-consumer FIFO.
+- Nothing in `processBlock` allocates memory, takes a lock, performs I/O or waits on another thread during
+  real-time playback. Buffers are sized in `prepareToPlay`; the analyser uses a wait-free
+  single-producer/single-consumer FIFO; linear-phase filters are designed on a worker thread and handed
+  over lock-free. (Offline rendering designs linear-phase filters on the rendering thread, which may wait
+  for the worker's current design.)
 
 ## 2. Filter design
 
@@ -234,10 +239,89 @@ OUT − IN and MATCH sets the output trim to cancel the measured difference (und
 - The audio thread only pushes samples into a wait-free FIFO, and only while an editor shows the analyser.
   FFTs run on the UI thread.
 
-## 8. Known limitations (M2)
+## 8. Linear-phase mode
 
-- No linear-phase mode yet (M3). The engine is minimum phase with 0 samples latency.
+Selected with the phase-mode switch (an engine setting: not automatable, not part of presets, A/B or undo,
+because it changes the latency).
+
+**Target.** The magnitude of the very same digital band designs the minimum-phase engine runs (section 2),
+evaluated exactly on a 2N-point frequency grid. Switching the mode therefore changes the phase, not the
+intended curve. Dynamic EQ is not applied in linear-phase mode; dynamic bands contribute their static
+settings (the editor says so).
+
+**Stereo routing.** Per frequency, the bands form a chain of real 2×2 matrices multiplied in band order
+(Stereo: scalar; Left/Right: diagonal; Mid/Side: T⁻¹·diag(m, s)·T with M = (L+R)/2, S = (L−R)/2). The FIR
+system is one filter for both channels when only Stereo bands are used, two independent channel filters when
+Left/Right bands are used, and a full 2×2 filter matrix when Mid/Side bands are used. On a mono bus Stereo and
+Mid bands apply, as in minimum-phase mode.
+
+**FIR design.** Zero-phase target → inverse FFT (2N points) → centred at N/2 → periodic Hann window (first
+tap zero, so the FIR is exactly symmetric: measured asymmetry 5e-17 of the peak) → N taps. Hann was chosen
+after comparing Hann, Blackman, Kaiser (β 6, 9) and 4-term Blackman-Harris windows: with this target the error
+is dominated by low-frequency resolution, where Hann's narrow main lobe was the most accurate in every case
+measured. A 2N design grid gave the same accuracy as 4N.
+
+**Convolution.** Uniformly partitioned overlap-save FFT convolution, partition P = 256 samples at
+44.1/48 kHz (scaled with the sample rate). Kernel spectra are stored as 32-bit floats (halves the memory;
+the realised response differs from the double-precision FIR by ≤ 6e-9 of the peak), the input spectra and
+all accumulation are 64-bit. Latency = N/2 + P samples, reported to the host.
+
+| Quality | FIR taps at 44.1/48 kHz (×2 at 88.2/96, ×4 at 176.4/192) | Latency at 48 kHz |
+|---|---|---|
+| Low latency | 8,192 | 4,352 samples (90.7 ms) |
+| Balanced (default) | 16,384 | 8,448 samples (176 ms) |
+| High resolution | 32,768 | 16,640 samples (347 ms) |
+
+Taps scale with the sample rate, so the frequency resolution in Hz and the latency in milliseconds are the
+same at every rate.
+
+**Parameter changes.** New FIRs are designed by a worker thread (one per plugin instance) and handed to the
+audio thread lock-free (a triple buffer for requests, an atomic index exchange for finished filters; the
+audio thread never waits). The audio thread crossfades from the old to the new filter over two partitions
+(raised cosine, 10.7 ms at 48 kHz); both filters have the same delay and see the same input history, so the
+fade interpolates magnitudes without phase cancellation. During offline rendering filters are designed
+synchronously on the rendering thread, so renders are deterministic. ThreadSanitizer reported no data races
+in the linear-phase tests (three runs of the suite).
+
+**Switching phase mode** fades the output out (10 ms), switches at silence, stays silent for the new path's
+latency (the new path starts from an empty history) and fades in (10 ms). Expect a short dropout when
+switching during playback. The bypass crossfade uses the dry signal delayed by the same latency.
+
+**Measured** (`LinearPhase.*` tests; max |realised − target| in dB, points below −60 dB ignored):
+
+| Curve (48 kHz) | Quality | 20–50 Hz | 50–200 Hz | 0.2–20 kHz |
+|---|---|---|---|---|
+| Vocal: HP 80 Hz 18 dB/oct, bells, high shelf | Low latency | 2.01 | 0.30 | 0.007 |
+| | Balanced | 0.54 | 0.076 | 0.0017 |
+| | High resolution | 0.14 | 0.019 | 0.0004 |
+| Bass: HP 30 Hz 48 dB/oct, bell 60 Hz +4 dB Q 2, bell 400 Hz | Low latency | 7.72 | 0.27 | 0.0015 |
+| | Balanced | 2.39 | 0.076 | 0.0004 |
+| | High resolution | 0.64 | 0.020 | 0.0001 |
+| Narrow bell 1 kHz −9 dB Q 8 | Low latency | — | — | 0.040 |
+| | High resolution | — | — | 0.0025 |
+
+- Phase: a pure delay of exactly the reported latency (deviation ≤ 9.3e-7 rad where |H| > −40 dB); the
+  impulse response peaks exactly at the reported latency.
+- Stereo routing: per-domain error above 200 Hz ≤ 0.0005 dB; no leakage between channels with Left/Right
+  bands; a mono-compatible input stays mono with Mid/Side bands (|L − R| ≤ 3.9e-16).
+- Parameter jumps 0 ↔ 12 dB every 100 ms: HF residual −144 dB. Bypass toggling: −179 dB. Phase-mode toggling
+  every 250 ms: −129 dB.
+- The editor draws the response of the FIR actually running (dashed), computed from the designed taps;
+  it matches the measured engine response within 1e-5 dB.
+
+**Inherent limitations.** A linear-phase filter of finite length cannot resolve features narrower than about
+fs/N: steep or narrow low-frequency settings (e.g. a 48 dB/oct high-pass at 30 Hz) are smoothed, and
+sharp low-frequency features produce pre-ringing (energy before the transient) that can be audible on drums
+and bass. Use the minimum-phase mode or a higher quality for such settings; the dashed curve shows the result.
+
+CPU and memory are listed in `ValidationReport.md` (about 1–1.6 % of one core per instance on the test VM for
+a typical curve; 6.5 MB / 12.9 MB allocated per instance at 48 kHz for Balanced / High resolution).
+
+## 9. Known limitations
+
 - No oversampling; accuracy near Nyquist at 44.1/48 kHz is as measured in section 2.4.
+- Linear-phase mode: see section 8 (latency, low-frequency resolution, pre-ringing, no dynamic EQ,
+  short dropout when switching the mode during playback).
 - Dynamic EQ is available on bell and shelf bands only (not on cut filters, notch, band pass, tilt or
   all pass).
 - Intelligent analysis suggestions are not implemented yet (M3).

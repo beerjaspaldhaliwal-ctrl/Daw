@@ -21,6 +21,9 @@ namespace id
     inline constexpr const char* outputTrim = "outGain";
     inline constexpr const char* bypass = "bypass";
     inline constexpr const char* autoGain = "autoGain";
+    // Engine settings (not automatable, not part of presets / A-B / undo: changing them changes the latency).
+    inline constexpr const char* phaseMode = "phase";
+    inline constexpr const char* lpQuality = "lpQuality";
 } // namespace id
 
 enum class BandParam : int
@@ -75,6 +78,7 @@ private:
     std::atomic<float>* outTrim = nullptr;
     std::atomic<float>* bypassRaw = nullptr;
     std::atomic<float>* autoGainRaw = nullptr;
+    std::atomic<float>* phaseRaw = nullptr;
     std::array<std::array<std::atomic<float>*, kNumBandParams>, dsp::kNumBands> band_ {};
 };
 

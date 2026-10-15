@@ -107,19 +107,33 @@ void band (MEProEQAudioProcessor& p, int b, mepro::dsp::FilterType t, float f, f
     set (p, bandParamId (b, BandParam::Threshold), -40.0f);
 }
 
+void typicalVocal (MEProEQAudioProcessor& p)
+{
+    using T = mepro::dsp::FilterType;
+    band (p, 0, T::HighPass, 80, 0, 0.707f, 3);
+    band (p, 1, T::Bell, 250, -3, 1.2f);
+    band (p, 2, T::Bell, 900, -1.5f, 2.0f);
+    band (p, 3, T::Bell, 3200, 2, 1.0f);
+    band (p, 4, T::HighShelf, 11000, 2.5f, 0.707f);
+    band (p, 5, T::Notch, 5600, 0, 8.0f);
+}
+
+void worstCase (MEProEQAudioProcessor& p)
+{
+    using T = mepro::dsp::FilterType;
+    for (int b = 0; b < 16; ++b)
+    {
+        const auto t = b < 4 ? (b % 2 ? T::LowPass : T::HighPass) : (b % 3 == 0 ? T::LowShelf : T::Bell);
+        band (p, b, t, 40.0f * std::pow (1.45f, (float) b), (b % 2 ? 3.0f : -3.0f), 1.5f, 7, b >= 8 && t != T::LowPass && t != T::HighPass);
+        set (p, mepro::params::bandParamId (b, BandParam::Stereo), (float) (b % 5));
+    }
+}
+
 std::vector<Config> configs()
 {
     using T = mepro::dsp::FilterType;
     return {
-        { "Typical vocal (6 static bands)", 6, 0, false, [] (auto& p)
-          {
-              band (p, 0, T::HighPass, 80, 0, 0.707f, 3);
-              band (p, 1, T::Bell, 250, -3, 1.2f);
-              band (p, 2, T::Bell, 900, -1.5f, 2.0f);
-              band (p, 3, T::Bell, 3200, 2, 1.0f);
-              band (p, 4, T::HighShelf, 11000, 2.5f, 0.707f);
-              band (p, 5, T::Notch, 5600, 0, 8.0f);
-          } },
+        { "Typical vocal (6 static bands)", 6, 0, false, typicalVocal },
         { "Vocal + 2 dynamic bands + analyzer", 8, 2, true, [] (auto& p)
           {
               band (p, 0, T::HighPass, 80, 0, 0.707f, 3);
@@ -131,14 +145,24 @@ std::vector<Config> configs()
               band (p, 6, T::Bell, 6500, 0, 3.0f, 1, true);
               band (p, 7, T::Bell, 300, 0, 2.0f, 1, true);
           } },
-        { "Worst case: 16 bands, 96 dB/oct cuts, 8 dynamic, M/S, analyzer", 16, 8, true, [] (auto& p)
+        { "Worst case: 16 bands, 96 dB/oct cuts, 8 dynamic, M/S, analyzer", 16, 8, true, worstCase },
+        { "Typical vocal, linear phase (Balanced, 16k taps)", 6, 0, false, [] (auto& p)
           {
-              for (int b = 0; b < 16; ++b)
-              {
-                  const auto t = b < 4 ? (b % 2 ? T::LowPass : T::HighPass) : (b % 3 == 0 ? T::LowShelf : T::Bell);
-                  band (p, b, t, 40.0f * std::pow (1.45f, (float) b), (b % 2 ? 3.0f : -3.0f), 1.5f, 7, b >= 8 && t != T::LowPass && t != T::HighPass);
-                  set (p, mepro::params::bandParamId (b, BandParam::Stereo), (float) (b % 5));
-              }
+              typicalVocal (p);
+              set (p, mepro::params::id::phaseMode, 1.0f);
+              set (p, mepro::params::id::lpQuality, 1.0f);
+          } },
+        { "Typical vocal, linear phase (High resolution, 32k taps)", 6, 0, false, [] (auto& p)
+          {
+              typicalVocal (p);
+              set (p, mepro::params::id::phaseMode, 1.0f);
+              set (p, mepro::params::id::lpQuality, 2.0f);
+          } },
+        { "Worst case routing (L/R + M/S bands), linear phase (High resolution)", 16, 0, true, [] (auto& p)
+          {
+              worstCase (p);
+              set (p, mepro::params::id::phaseMode, 1.0f);
+              set (p, mepro::params::id::lpQuality, 2.0f);
           } },
     };
 }
@@ -180,7 +204,7 @@ int main (int argc, char** argv)
         for (int i = 0; i < input.getNumSamples(); ++i)
             input.setSample (c, i, (rng.nextFloat() * 2.0f - 1.0f) * 0.25f);
 
-    double memPerInstance = 0.0;
+    std::vector<std::pair<std::string, double>> memPerInstance;
     for (const auto& cfg : configs())
     {
         for (int instances : { 1, 8, 16, 32 })
@@ -197,7 +221,15 @@ int main (int argc, char** argv)
                 procs.push_back (std::move (p));
             }
             if (instances == 32)
-                memPerInstance = std::max (memPerInstance, (residentMemoryMB() - m0) / 32.0);
+            {
+                // Resident-set growth is unreliable once earlier configurations have freed memory (the allocator
+                // reuses it), so the linear-phase engine's own allocation is reported as well.
+                double lpMB = 0.0;
+                if (const auto* lp = procs.front()->getEngine().getLinearPhaseForUi())
+                    lpMB = (double) lp->getAllocatedBytes() / (1024.0 * 1024.0);
+                memPerInstance.emplace_back (cfg.name + (lpMB > 0.0 ? " (of which linear-phase engine: " + std::to_string (lpMB).substr (0, 5) + " MB)" : ""),
+                                             (residentMemoryMB() - m0) / 32.0);
+            }
 
             juce::AudioBuffer<float> buf (2, block);
             juce::MidiBuffer midi;
@@ -241,8 +273,12 @@ int main (int argc, char** argv)
     }
     md << "\n| Memory | Value |\n|---|---|\n";
     md << "| Process resident memory before instances | " << memBefore << " MB |\n";
-    md << "| Approx. resident memory per instance (32-instance run, worst config) | " << memPerInstance << " MB |\n";
-    std::printf ("\nCPU: %s\nmemory per instance: %.2f MB\n", cpuName().c_str(), memPerInstance);
+    std::printf ("\nCPU: %s\n", cpuName().c_str());
+    for (const auto& [name, mb] : memPerInstance)
+    {
+        md << "| Approx. resident memory per instance (32 instances): " << name << " | " << mb << " MB |\n";
+        std::printf ("memory per instance, %s: %.2f MB\n", name.c_str(), mb);
+    }
 
     if (! mdPath.empty())
     {

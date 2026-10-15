@@ -7,6 +7,7 @@
 
 #include "DSP/FilterDesign.h"
 
+#include <chrono>
 #include <set>
 #include <thread>
 
@@ -23,15 +24,18 @@ ME_TEST ("Plugin", ParameterSetIsStable)
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
             ids.insert (rp->paramID);
     measure ("host parameters", (double) prms.size());
-    CHECK (prms.size() == 4 + 16 * mepro::params::kNumBandParams); // in/out trim, bypass, auto gain + 16 bands
+    CHECK (prms.size() == 6 + 16 * mepro::params::kNumBandParams); // in/out trim, bypass, auto gain, phase, LP quality + 16 bands
     CHECK ((int) ids.size() == prms.size()); // unique IDs
     for (const char* id : { "inGain", "outGain", "bypass", "autoGain", "b1_used", "b1_freq", "b16_sc", "b8_range", "b12_slope" })
         CHECK_MSG (ids.count (id) == 1, "missing parameter " << id);
     CHECK (p.getBypassParameter() != nullptr && dynamic_cast<juce::RangedAudioParameter*> (p.getBypassParameter())->paramID == "bypass");
-    // Every parameter is automatable and has a readable name and value text.
+    // Every parameter has a readable name and value text; all are automatable except the two engine settings
+    // that change the latency (phase mode, linear-phase quality).
     for (auto* prm : prms)
     {
-        CHECK (prm->isAutomatable());
+        const auto pid = dynamic_cast<juce::RangedAudioParameter*> (prm)->paramID;
+        const bool engineSetting = pid == mepro::params::id::phaseMode || pid == mepro::params::id::lpQuality;
+        CHECK_MSG (prm->isAutomatable() != engineSetting, pid);
         CHECK (prm->getName (64).isNotEmpty());
         CHECK (prm->getCurrentValueAsText().isNotEmpty());
     }
@@ -319,6 +323,122 @@ ME_TEST ("Plugin", EditorOpensRendersAndEdits)
     }
     ed.reset();
     CHECK (p.getAuditionBand() == -1);
+}
+
+ME_TEST ("Plugin", LinearPhaseModeReportsLatencyAndRenders)
+{
+    juceInit();
+    const double fs = 48000.0;
+    MEProEQAudioProcessor p;
+    p.prepareToPlay (fs, 512);
+    CHECK (p.getLatencySamples() == 0);
+    setParam (p, bp (0, BandParam::Used), 1.0f);
+    setParam (p, bp (0, BandParam::Freq), 2000.0f);
+    setParam (p, bp (0, BandParam::Gain), 6.0f);
+
+    // Switch to linear phase (Balanced): the message-thread maintenance builds the engine and reports latency.
+    setParam (p, mepro::params::id::phaseMode, 1.0f);
+    p.maintainLinearPhase();
+    const int L = mepro::dsp::linearPhaseGeometry (fs, mepro::dsp::kDefaultLinearPhaseQuality).latency;
+    CHECK (p.getLatencySamples() == L);
+    measure ("linear phase (Balanced) at 48 kHz: reported latency (samples)", (double) p.getLatencySamples());
+
+    // An impulse comes out after exactly the reported latency (after the switch fade has completed).
+    std::vector<float> warm (24000, 0.0f), warmR = warm;
+    renderStereo (p, warm, warmR, 512);
+    CHECK (p.getEngine().isUsingLinearPhase());
+    std::vector<float> l ((size_t) (3 * L), 0.0f), r = l;
+    l[0] = r[0] = 1.0f;
+    renderStereo (p, l, r, 512);
+    size_t peak = 0;
+    for (size_t i = 0; i < l.size(); ++i)
+        if (std::abs (l[i]) > std::abs (l[peak]))
+            peak = i;
+    measure ("impulse peak position (samples)", (double) peak);
+    CHECK ((int) peak == L);
+
+    // The editor shows the realised FIR response in linear-phase mode (screenshot for review).
+    {
+        setParam (p, bp (1, BandParam::Used), 1.0f);
+        setParam (p, bp (1, BandParam::Type), (float) mepro::dsp::FilterType::HighPass);
+        setParam (p, bp (1, BandParam::Freq), 30.0f);
+        setParam (p, bp (1, BandParam::Slope), 5.0f);
+        std::vector<float> w2 (48000, 0.0f), w2r = w2;
+        renderStereo (p, w2, w2r, 512);
+        std::this_thread::sleep_for (std::chrono::milliseconds (100)); // worker designs the new curve
+        renderStereo (p, w2, w2r, 512);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
+        ed->setSize (1220, 760);
+        if (auto* e = dynamic_cast<MEProEQAudioProcessorEditor*> (ed.get()))
+            e->refreshNow (0.05);
+        const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+        CHECK (img.isValid());
+        auto file = juce::File::getCurrentWorkingDirectory().getChildFile ("reports/screenshots/editor_linear_phase.png");
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+        juce::FileOutputStream os (file);
+        juce::PNGImageFormat().writeImageToStream (img, os);
+        setParam (p, bp (1, BandParam::Used), 0.0f);
+    }
+
+    // Quality change: a new engine is built, the latency follows.
+    setParam (p, mepro::params::id::lpQuality, 0.0f);
+    p.maintainLinearPhase();
+    CHECK (p.getLatencySamples() == mepro::dsp::linearPhaseGeometry (fs, 0).latency);
+
+    // Phase mode is an engine setting: presets, A/B and undo leave it alone; project state restores it.
+    p.getPresets().loadByName (p.getPresets().getPresets().front().name);
+    CHECK (getParam (p, mepro::params::id::phaseMode) == 1.0f);
+    p.getAB().switchTo (mepro::state::ABComparison::Slot::B);
+    CHECK (getParam (p, mepro::params::id::phaseMode) == 1.0f);
+    juce::MemoryBlock blob;
+    p.getStateInformation (blob);
+    MEProEQAudioProcessor q;
+    q.setStateInformation (blob.getData(), (int) blob.getSize());
+    q.prepareToPlay (fs, 512);
+    CHECK (q.getLatencySamples() == mepro::dsp::linearPhaseGeometry (fs, 0).latency);
+
+    // Back to minimum phase: zero latency again; the engine is released.
+    setParam (p, mepro::params::id::phaseMode, 0.0f);
+    p.maintainLinearPhase();
+    CHECK (p.getLatencySamples() == 0);
+    renderStereo (p, warm, warmR, 512);
+    p.maintainLinearPhase();
+    CHECK (! p.getEngine().isUsingLinearPhase());
+}
+
+ME_TEST ("Plugin", LinearPhaseOfflineRenderIsDeterministic)
+{
+    juceInit();
+    auto render = []
+    {
+        MEProEQAudioProcessor p;
+        setParam (p, mepro::params::id::phaseMode, 1.0f);
+        setParam (p, bp (0, BandParam::Used), 1.0f);
+        setParam (p, bp (0, BandParam::Freq), 120.0f);
+        setParam (p, bp (0, BandParam::Gain), -4.0f);
+        p.setNonRealtime (true);
+        p.prepareToPlay (44100.0, 512);
+        auto x = pinkNoise (44100 * 2, 0.3, 77);
+        std::vector<float> l (x.begin(), x.end()), r = l;
+        juce::MidiBuffer midi;
+        juce::AudioBuffer<float> buf (2, 512);
+        for (int pos = 0; pos < (int) l.size(); pos += 512)
+        {
+            if (pos == 44100)
+                setParam (p, bp (0, BandParam::Gain), 5.0f); // automation in the middle of the render
+            const int n = std::min (512, (int) l.size() - pos);
+            buf.setSize (2, n, false, false, true);
+            std::copy (l.begin() + pos, l.begin() + pos + n, buf.getWritePointer (0));
+            std::copy (r.begin() + pos, r.begin() + pos + n, buf.getWritePointer (1));
+            p.processBlock (buf, midi);
+            std::copy (buf.getReadPointer (0), buf.getReadPointer (0) + n, l.begin() + pos);
+            std::copy (buf.getReadPointer (1), buf.getReadPointer (1) + n, r.begin() + pos);
+        }
+        return l;
+    };
+    const auto a = render(), b = render();
+    CHECK (a == b);
 }
 
 ME_TEST ("Plugin", EditorUndoABPresetAndLevelMatch)

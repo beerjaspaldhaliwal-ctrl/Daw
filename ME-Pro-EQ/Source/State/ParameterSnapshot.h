@@ -1,5 +1,6 @@
 // ME Pro EQ — ME Audio
-// Captures / restores the complete sound-relevant parameter set (everything except global bypass).
+// Captures / restores the sound-relevant parameter set (everything except global bypass and the engine
+// settings phase mode / linear-phase quality, which change the plugin's latency).
 // Used by A/B comparison, undo/redo and presets. Message thread only.
 #pragma once
 
@@ -15,7 +16,7 @@ using Snapshot = std::vector<float>; // normalised values, in the order of getPa
 class ParameterSnapshotter
 {
 public:
-    explicit ParameterSnapshotter (juce::AudioProcessor& processor, const juce::String& excludedId = "bypass");
+    ParameterSnapshotter (juce::AudioProcessor& processor, const juce::StringArray& excludedIds);
 
     Snapshot capture() const;
     // Applies the snapshot; each changed parameter is set inside a complete host gesture.

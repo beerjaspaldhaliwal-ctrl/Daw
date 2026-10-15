@@ -251,6 +251,8 @@ void BandPanel::updateEnablement()
     juce::String note;
     if (! dynSupported)
         note = "Dynamics are available for bell and shelf bands";
+    else if (dynOn && model.getProcessor().getEngine().isUsingLinearPhase())
+        note = "Linear-phase mode: dynamic EQ is inactive, the static settings apply";
     else if (dynOn && model.get (b, BandParam::Sidechain) > 0.5f && ! model.getProcessor().isSidechainAvailable())
         note = "External sidechain selected, but the host is not sending a sidechain signal";
     else if (model.getProcessor().getMainChannelCount() == 1

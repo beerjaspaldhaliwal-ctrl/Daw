@@ -34,9 +34,12 @@ add_library(meproeq_dsp STATIC
     Source/DSP/EQEngine.cpp
     Source/DSP/FFT.cpp
     Source/DSP/SpectrumAnalyzer.cpp
+    Source/DSP/LinearPhase.cpp
 )
 target_include_directories(meproeq_dsp PUBLIC Source)
 target_compile_features(meproeq_dsp PUBLIC cxx_std_20)
+find_package(Threads REQUIRED)
+target_link_libraries(meproeq_dsp PUBLIC Threads::Threads) # linear-phase design worker
 
 #-------------------------------------------------------------------------------
 # Tests
@@ -50,6 +53,7 @@ if(MEPROEQ_BUILD_TESTS)
         Tests/DynamicEQTests.cpp
         Tests/AutomationTests.cpp
         Tests/AnalyzerTests.cpp
+        Tests/LinearPhaseTests.cpp
     )
     target_link_libraries(meproeq_dsp_tests PRIVATE meproeq_dsp)
     target_include_directories(meproeq_dsp_tests PRIVATE Tests)

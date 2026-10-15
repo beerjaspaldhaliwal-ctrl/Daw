@@ -175,6 +175,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     layout.add (makeFloat (id::outputTrim, "Output Trim", { (float) EQEngine::kTrimMinDb, (float) EQEngine::kTrimMaxDb }, 0.0f, gainText, gainParse, "dB"));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bypass, kParameterVersion }, "Bypass", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::autoGain, kParameterVersion }, "Auto Gain", false));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::phaseMode, kParameterVersion }, "Phase Mode",
+                                                              juce::StringArray { "Minimum phase", "Linear phase" }, 0,
+                                                              ChoiceAttr().withAutomatable (false)));
+    {
+        juce::StringArray q;
+        for (const char* n : kLinearPhaseQualityNames)
+            q.add (n);
+        layout.add (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id::lpQuality, kParameterVersion }, "Linear Phase Quality",
+                                                                  q, kDefaultLinearPhaseQuality, ChoiceAttr().withAutomatable (false)));
+    }
 
     juce::StringArray typeNames, slopeNames, stereoNames;
     for (int t = 0; t < (int) FilterType::NumTypes; ++t)
@@ -228,6 +238,7 @@ void ParameterReader::init (juce::AudioProcessorValueTreeState& state)
     outTrim = state.getRawParameterValue (id::outputTrim);
     bypassRaw = state.getRawParameterValue (id::bypass);
     autoGainRaw = state.getRawParameterValue (id::autoGain);
+    phaseRaw = state.getRawParameterValue (id::phaseMode);
     for (int b = 0; b < dsp::kNumBands; ++b)
         for (int p = 0; p < kNumBandParams; ++p)
         {
@@ -244,6 +255,7 @@ void ParameterReader::read (dsp::EngineSettings& out) const noexcept
     out.outputTrimDb = outTrim->load (std::memory_order_relaxed);
     out.bypass = bypassRaw->load (std::memory_order_relaxed) > 0.5f;
     out.autoGain = autoGainRaw->load (std::memory_order_relaxed) > 0.5f;
+    out.phaseMode = phaseRaw->load (std::memory_order_relaxed) > 0.5f ? PhaseMode::Linear : PhaseMode::Minimum;
     for (int b = 0; b < kNumBands; ++b)
     {
         const auto& p = band_[(size_t) b];
