@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <map>
+#include <string>
 
 using namespace mepro::dsp;
 using namespace metest;
@@ -159,38 +160,118 @@ ME_TEST ("Filter", ShelfAccuracyVsAnalogPrototype)
 
 ME_TEST ("Filter", CutFilterAccuracyVsAnalogPrototype)
 {
+    // High/low-pass use prewarped bilinear Butterworth designs (exact cutoff, monotonic; see
+    // ResponseShapeInvariants). Their deviation from the analog prototype is the bilinear frequency warp,
+    // reported here for cut-off frequencies up to fs/16.
     for (double fs : allSampleRates())
     {
         DevStats hp6, lp6, hp24, lp24;
         for (auto type : { FilterType::HighPass, FilterType::LowPass })
             for (int slope = 0; slope < (int) kSlopesDbPerOct.size(); ++slope)
-                for (double f0 : geomspace (10.0, std::min (30000.0, 0.45 * fs), 30))
+                for (double f0 : geomspace (10.0, fs / 16, 30))
                 {
-                    if (f0 >= fs / 8)
-                        continue;
                     DesignSpec s { type, f0, 0.0, kButterworthQ, slope };
                     const bool hp = type == FilterType::HighPass;
-                    (hp ? hp6 : lp6).add (maxDeviationDb (s, fs, -6.0), where (s, fs));   // pass band + cutoff
-                    (hp ? hp24 : lp24).add (maxDeviationDb (s, fs, -24.0), where (s, fs)); // + transition
+                    (hp ? hp6 : lp6).add (maxDeviationDb (s, fs, -6.0), where (s, fs));
+                    (hp ? hp24 : lp24).add (maxDeviationDb (s, fs, -24.0), where (s, fs));
                 }
         const std::string tag = "fs " + str (fs) + " ";
-        measure (tag + "HP f0<fs/8: max dev where analog > -6 dB (dB)", hp6.maxDev);
-        measure (tag + "LP f0<fs/8: max dev where analog > -6 dB (dB)", lp6.maxDev);
-        measure (tag + "HP f0<fs/8: max dev where analog > -24 dB (dB)", hp24.maxDev);
-        measure (tag + "LP f0<fs/8: max dev where analog > -24 dB (dB)", lp24.maxDev);
-        CHECK_MSG (hp6.maxDev < 0.2, tag << "HP worst " << hp6.worst << " " << hp6.maxDev);
-        CHECK_MSG (lp6.maxDev < 0.25, tag << "LP worst " << lp6.worst << " " << lp6.maxDev);
-        CHECK_MSG (hp24.maxDev < 0.25, tag << "HP worst " << hp24.worst << " " << hp24.maxDev);
-        CHECK_MSG (lp24.maxDev < 1.2, tag << "LP worst " << lp24.worst << " " << lp24.maxDev);
+        measure (tag + "HP f0<=fs/16: max dev where analog > -6 dB (dB)", hp6.maxDev);
+        measure (tag + "LP f0<=fs/16: max dev where analog > -6 dB (dB)", lp6.maxDev);
+        measure (tag + "HP f0<=fs/16: max dev where analog > -24 dB (dB)", hp24.maxDev);
+        measure (tag + "LP f0<=fs/16: max dev where analog > -24 dB (dB)", lp24.maxDev);
+        CHECK_MSG (hp6.maxDev < 0.25 && lp6.maxDev < 0.25, tag << "HP " << hp6.worst << " " << hp6.maxDev << " LP " << lp6.worst << " " << lp6.maxDev);
+        // Low-pass: the bilinear design has a zero at Nyquist, so far into the stop band it attenuates more than
+        // the analog prototype (reported, not a defect). High-pass stop band lies at low frequencies: checked.
+        CHECK_MSG (hp24.maxDev < 1.0, tag << "HP " << hp24.worst << " " << hp24.maxDev);
+    }
+}
+
+ME_TEST ("Filter", ResponseShapeInvariants)
+{
+    // For every reachable design (f0 up to min(30 kHz, 0.49 fs)) at every sample rate:
+    //   high-pass rises monotonically, low-pass falls monotonically, neither exceeds 0 dB;
+    //   shelves/tilts (Q = 0.71) are monotonic and never exceed their plateau;
+    //   bells / band-pass have a single extremum at f0; notches a single minimum; no overshoot.
+    struct Worst { double mono = 0, over = 0; std::string monoWhere, overWhere; };
+    std::map<std::string, Worst> worst;
+    auto scan = [&] (const std::string& key, const DesignSpec& sp, double fs, int shape, double maxDb)
+    {
+        const auto c = designCascade (sp, fs);
+        double prev = 0, mono = 0, over = 0;
+        bool first = true;
+        for (int i = 0; i < 2500; ++i)
+        {
+            const double f = 5.0 * std::pow ((0.4999 * fs) / 5.0, i / 2499.0);
+            const double m = c.magnitudeDb (kTwoPi * f / fs);
+            over = std::max (over, m - maxDb);
+            const bool nearPeak = std::abs (shape) == 2 && std::abs (std::log2 (f / sp.freqHz)) < 0.01;
+            if (! first && ! nearPeak)
+            {
+                const int dir = shape == 1 ? 1 : shape == -1 ? -1 : shape == 2 ? (f <= sp.freqHz ? 1 : -1) : (f <= sp.freqHz ? -1 : 1);
+                mono = std::max (mono, dir > 0 ? prev - m : m - prev);
+            }
+            prev = m;
+            first = false;
+        }
+        const std::string region = sp.freqHz < 0.25 * fs ? " f0<fs/4" : " f0>=fs/4";
+        auto& w = worst[key + region];
+        if (mono > w.mono)
+        {
+            w.mono = mono;
+            w.monoWhere = where (sp, fs);
+        }
+        if (over > w.over)
+        {
+            w.over = over;
+            w.overWhere = where (sp, fs);
+        }
+    };
+    for (double fs : allSampleRates())
+        for (double f0 : geomspace (10.0, std::min (30000.0, 0.49 * fs), 40))
+        {
+            for (int sl = 0; sl < 8; ++sl)
+            {
+                scan ("high-pass", { FilterType::HighPass, f0, 0, kButterworthQ, sl }, fs, 1, 0.0);
+                scan ("low-pass", { FilterType::LowPass, f0, 0, kButterworthQ, sl }, fs, -1, 0.0);
+                if (sl <= kMaxShelfSlopeIndex)
+                    for (double g : { -24.0, -6.0, 6.0, 24.0 })
+                    {
+                        scan ("low shelf", { FilterType::LowShelf, f0, g, kButterworthQ, sl }, fs, g > 0 ? -1 : 1, std::max (g, 0.0));
+                        scan ("high shelf", { FilterType::HighShelf, f0, g, kButterworthQ, sl }, fs, g > 0 ? 1 : -1, std::max (g, 0.0));
+                        scan ("tilt", { FilterType::Tilt, f0, g, kButterworthQ, sl }, fs, g > 0 ? 1 : -1, std::abs (g) / 2);
+                    }
+            }
+            for (double q : { 0.3, 0.7071, 2.0, 8.0, 30.0 })
+            {
+                for (double g : { -24.0, -6.0, 6.0, 24.0 })
+                    scan ("bell", { FilterType::Bell, f0, g, q, 1 }, fs, g > 0 ? 2 : -2, std::max (g, 0.0));
+                scan ("notch", { FilterType::Notch, f0, 0, q, 1 }, fs, -2, 0.0);
+                scan ("band-pass", { FilterType::BandPass, f0, 0, q, 1 }, fs, 2, 0.0);
+            }
+        }
+    for (auto& [k, w] : worst)
+    {
+        measure (k + ": max non-monotonic step / max overshoot (dB)", str (w.mono) + " / " + str (w.over));
+        const bool cut = k.rfind ("high-pass", 0) == 0 || k.rfind ("low-pass", 0) == 0;
+        const bool low = k.find ("f0<fs/4") != std::string::npos;
+        const double monoTol = cut ? 1e-6 : (low ? 0.01 : 0.1);
+        const double overTol = cut ? 1e-6 : (low ? 0.075 : 0.25);
+        CHECK_MSG (w.mono <= monoTol && w.over <= overTol, k << " mono " << w.mono << " at " << w.monoWhere << "; over " << w.over << " at " << w.overWhere);
     }
 }
 
 ME_TEST ("Filter", ExactAtMatchPoints)
 {
-    // The design is exact (to rounding) at DC, f0 and Nyquist for bells/shelves, and at f0 for cut filters.
-    double worst = 0.0;
+    // Below 0.25 fs bells/shelves are pure analog-matched designs: exact (to rounding) at DC, f0 and Nyquist.
+    // Above 0.40 fs they are pure bilinear designs: exact at DC and f0. Cut filters: exact -3.01 dB cutoff.
+    double worst = 0.0, worstBlt = 0.0;
     for (double fs : allSampleRates())
         for (double f0 : geomspace (10.0, 0.49 * fs, 25))
+        {
+            const double r = f0 / fs;
+            if (r > 0.25 && r < 0.40)
+                continue; // blend region (see ResponseShapeInvariants for its guarantees)
             for (double q : { 0.3, 1.0, 10.0 })
                 for (double g : { -30.0, -6.0, 6.0, 30.0 })
                     for (auto t : { FilterType::Bell, FilterType::LowShelf, FilterType::HighShelf })
@@ -200,19 +281,24 @@ ME_TEST ("Filter", ExactAtMatchPoints)
                         const auto ana = analogPrototype (s, fs);
                         const double fd = ana.designFreqHz;
                         const double w0 = kTwoPi * fd / fs;
-                        for (auto [w, f] : { std::pair { 1e-9, 1e-9 * fs / kTwoPi }, std::pair { w0, fd }, std::pair { kPi, fs / 2 } })
+                        std::vector<std::pair<double, double>> pts { { 1e-9, 1e-9 * fs / kTwoPi }, { w0, fd } };
+                        if (r <= 0.25)
+                            pts.push_back ({ kPi, fs / 2 });
+                        for (auto [w, f] : pts)
                         {
                             const double e = std::abs (db (std::abs (dig.response (w))) - db (std::abs (ana.response (f))));
-                            worst = std::max (worst, e);
+                            (r <= 0.25 ? worst : worstBlt) = std::max (r <= 0.25 ? worst : worstBlt, e);
                             CHECK_MSG (e < 1e-6, where (s, fs) << " w=" << w << " err " << e);
                         }
                     }
-    measure ("max error at DC / f0 / Nyquist (dB)", worst);
+        }
+    measure ("max error at DC / f0 / Nyquist, analog-matched region (dB)", worst);
+    measure ("max error at DC / f0, bilinear region (dB)", worstBlt);
 
     double worstHp = 0.0;
     for (double fs : allSampleRates())
         for (int slope = 0; slope < 8; ++slope)
-            for (double f0 : geomspace (10.0, 0.45 * fs, 20))
+            for (double f0 : geomspace (10.0, 0.49 * fs, 20))
                 for (auto t : { FilterType::HighPass, FilterType::LowPass })
                 {
                     DesignSpec s { t, f0, 0.0, kButterworthQ, slope };

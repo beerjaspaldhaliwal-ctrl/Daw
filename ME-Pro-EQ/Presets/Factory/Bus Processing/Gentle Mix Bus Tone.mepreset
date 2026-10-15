@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MEProEQPreset name="Gentle Mix Bus Tone" category="Bus Processing" author="ME Audio" version="1" description="Very broad, low-order moves: subsonic filter, slight warmth, small mud dip and a 6 dB/oct air shelf.">
+  <PARAM id="b1_used" value="1"/>
+  <PARAM id="b1_on" value="1"/>
+  <PARAM id="b1_type" value="3"/>
+  <PARAM id="b1_freq" value="20"/>
+  <PARAM id="b1_gain" value="0"/>
+  <PARAM id="b1_q" value="0.7071"/>
+  <PARAM id="b1_slope" value="1"/>
+  <PARAM id="b1_stereo" value="0"/>
+  <PARAM id="b2_used" value="1"/>
+  <PARAM id="b2_on" value="1"/>
+  <PARAM id="b2_type" value="1"/>
+  <PARAM id="b2_freq" value="80"/>
+  <PARAM id="b2_gain" value="0.8"/>
+  <PARAM id="b2_q" value="0.7071"/>
+  <PARAM id="b2_slope" value="0"/>
+  <PARAM id="b2_stereo" value="0"/>
+  <PARAM id="b3_used" value="1"/>
+  <PARAM id="b3_on" value="1"/>
+  <PARAM id="b3_type" value="0"/>
+  <PARAM id="b3_freq" value="300"/>
+  <PARAM id="b3_gain" value="-0.5"/>
+  <PARAM id="b3_q" value="0.8"/>
+  <PARAM id="b3_slope" value="1"/>
+  <PARAM id="b3_stereo" value="0"/>
+  <PARAM id="b4_used" value="1"/>
+  <PARAM id="b4_on" value="1"/>
+  <PARAM id="b4_type" value="2"/>
+  <PARAM id="b4_freq" value="12000"/>
+  <PARAM id="b4_gain" value="1"/>
+  <PARAM id="b4_q" value="0.7071"/>
+  <PARAM id="b4_slope" value="0"/>
+  <PARAM id="b4_stereo" value="0"/>
+</MEProEQPreset>

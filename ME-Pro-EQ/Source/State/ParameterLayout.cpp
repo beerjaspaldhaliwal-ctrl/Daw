@@ -174,6 +174,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     layout.add (makeFloat (id::inputTrim, "Input Trim", { (float) EQEngine::kTrimMinDb, (float) EQEngine::kTrimMaxDb }, 0.0f, gainText, gainParse, "dB"));
     layout.add (makeFloat (id::outputTrim, "Output Trim", { (float) EQEngine::kTrimMinDb, (float) EQEngine::kTrimMaxDb }, 0.0f, gainText, gainParse, "dB"));
     layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::bypass, kParameterVersion }, "Bypass", false));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id::autoGain, kParameterVersion }, "Auto Gain", false));
 
     juce::StringArray typeNames, slopeNames, stereoNames;
     for (int t = 0; t < (int) FilterType::NumTypes; ++t)
@@ -226,6 +227,7 @@ void ParameterReader::init (juce::AudioProcessorValueTreeState& state)
     inTrim = state.getRawParameterValue (id::inputTrim);
     outTrim = state.getRawParameterValue (id::outputTrim);
     bypassRaw = state.getRawParameterValue (id::bypass);
+    autoGainRaw = state.getRawParameterValue (id::autoGain);
     for (int b = 0; b < dsp::kNumBands; ++b)
         for (int p = 0; p < kNumBandParams; ++p)
         {
@@ -241,6 +243,7 @@ void ParameterReader::read (dsp::EngineSettings& out) const noexcept
     out.inputTrimDb = inTrim->load (std::memory_order_relaxed);
     out.outputTrimDb = outTrim->load (std::memory_order_relaxed);
     out.bypass = bypassRaw->load (std::memory_order_relaxed) > 0.5f;
+    out.autoGain = autoGainRaw->load (std::memory_order_relaxed) > 0.5f;
     for (int b = 0; b < kNumBands; ++b)
     {
         const auto& p = band_[(size_t) b];

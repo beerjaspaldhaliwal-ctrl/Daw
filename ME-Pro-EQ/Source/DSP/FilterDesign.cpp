@@ -301,15 +301,36 @@ SectionCoeffs invertSection (const SectionCoeffs& s) noexcept
     return r;
 }
 
-SectionCoeffs designSection (const AnalogSection& a, double w0) noexcept
+SectionCoeffs designSection (const AnalogSection& a, double w0, double blend) noexcept
 {
     SectionCoeffs s;
 
-    if (a.order == 1)
+    if (a.order == 1 && (a.kind == AnalogSection::Kind::LowPass || a.kind == AnalogSection::Kind::HighPass))
+    {
+        const bool lp = a.kind == AnalogSection::Kind::LowPass;
+        s.order = 1;
+        s.g = std::tan (0.5 * w0); // bilinear, prewarped: exact -3.01 dB at f0, monotonic
+        s.k = 0.0;
+        s.clp = lp ? 1.0 : 0.0;
+        s.cbp = 0.0;
+        s.chp = lp ? 0.0 : 1.0;
+    }
+    else if (a.order == 1)
     {
         AnalogSection unscaled = a;
         unscaled.scale = 1.0;
         s = designFirstOrder (unscaled, w0);
+        if (blend > 0.0)
+        {
+            // Geometric blend of (g, DC gain, Nyquist gain): commutes with inversion, so first-order boost and
+            // cut stay exact mirror images, and at blend = 1 the whole cascade is one consistent bilinear map
+            // (odd-order shelves rely on the first-order section compensating the second-order overshoot).
+            const auto b = designSectionBilinear (unscaled, w0);
+            auto mixLog = [blend] (double x, double y) { return x * std::pow (y / x, blend); };
+            s.g = mixLog (s.g, b.g);
+            s.clp = mixLog (s.clp, b.clp);
+            s.chp = mixLog (s.chp, b.chp);
+        }
     }
     else
     {
@@ -332,10 +353,16 @@ SectionCoeffs designSection (const AnalogSection& a, double w0) noexcept
 
         const double wp = std::sqrt (p.d0 / p.d2);
         const double zeta = p.d1 / (2.0 * std::sqrt (p.d0 * p.d2));
-        if (p.kind == AnalogSection::Kind::AllPass)
+        if (p.kind == AnalogSection::Kind::AllPass || p.kind == AnalogSection::Kind::LowPass
+            || p.kind == AnalogSection::Kind::HighPass)
         {
-            // An all-pass has no magnitude to match; what matters is its phase. Bilinear poles prewarped at
-            // f0 put the -180 degree point exactly at f0 at every sample rate.
+            // Bilinear transform prewarped at the section frequency.
+            //  * All-pass: no magnitude to match; the -180 degree point lands exactly on f0.
+            //  * High-/low-pass: the bilinear map is monotonic over 0..Nyquist, so Butterworth cut filters stay
+            //    exactly monotonic (no pass-band bumps or overshoot) with an exact -3.01 dB cutoff at any
+            //    frequency. Magnitude matching was measured to produce pass-band peaks of several dB for steep,
+            //    high cutoffs. The price is the bilinear frequency warp tan(pi f / fs), negligible for cut-off
+            //    frequencies well below Nyquist (0.14 % at 1 kHz / 48 kHz).
             s.g = std::tan (0.5 * wp * w0);
             s.k = 2.0 * zeta;
         }
@@ -350,21 +377,21 @@ SectionCoeffs designSection (const AnalogSection& a, double w0) noexcept
         switch (p.kind)
         {
             case AnalogSection::Kind::General:
-            case AnalogSection::Kind::LowPass:
                 matchNumerator (s, unscaled.magnitudeSquared (0.0), unscaled.magnitudeSquared (Wn),
                                 w0, unscaled.magnitudeSquared (1.0));
                 break;
 
-            case AnalogSection::Kind::HighPass:
-            {
-                // Double zero at DC; single gain matched at f0 => exact cutoff gain.
-                const double um = std::tan (0.5 * w0) / s.g, vm = um * um;
-                const double dn = sq (1.0 - vm) + s.k * s.k * vm;
-                s.clp = 0.0;
+            case AnalogSection::Kind::LowPass:
+                s.clp = 1.0; // pure bilinear low-pass: unity DC gain, zero at Nyquist
                 s.cbp = 0.0;
-                s.chp = std::sqrt (unscaled.magnitudeSquared (1.0) * dn) / vm;
+                s.chp = 0.0;
                 break;
-            }
+
+            case AnalogSection::Kind::HighPass:
+                s.clp = 0.0; // pure bilinear high-pass: double zero at DC, unity gain at Nyquist
+                s.cbp = 0.0;
+                s.chp = 1.0;
+                break;
 
             case AnalogSection::Kind::BandPass:
             {
@@ -392,6 +419,26 @@ SectionCoeffs designSection (const AnalogSection& a, double w0) noexcept
                 s.cbp = -s.k;
                 s.chp = 1.0;
                 break;
+        }
+
+        // Near Nyquist, blend towards the shape-preserving bilinear design. For general (bell/shelf) sections
+        // the blend is applied in the base orientation, before inversion, so boost and cut stay exact mirror
+        // images.
+        if (blend > 0.0 && (p.kind == AnalogSection::Kind::General || p.kind == AnalogSection::Kind::Notch
+                            || p.kind == AnalogSection::Kind::BandPass))
+        {
+            const auto b = designSectionBilinear (unscaled, w0);
+            auto mix = [blend] (double x, double y) { return x + blend * (y - x); };
+            s.g = mix (s.g, b.g);
+            s.k = mix (s.k, b.k);
+            s.clp = mix (s.clp, b.clp);
+            s.cbp = mix (s.cbp, b.cbp);
+            s.chp = mix (s.chp, b.chp);
+            if (p.kind == AnalogSection::Kind::Notch)
+            {
+                const double uz = std::tan (0.5 * w0) / s.g; // keep the zeros exactly at f0
+                s.chp = s.clp / (uz * uz);
+            }
         }
 
         if (invert)
@@ -476,6 +523,7 @@ AnalogCascade analogPrototype (const DesignSpec& spec, double sampleRate) noexce
             {
                 AnalogSection s;
                 s.order = 1;
+                s.kind = hp ? AnalogSection::Kind::HighPass : AnalogSection::Kind::LowPass;
                 s.n0 = hp ? 0.0 : 1.0; s.n1 = hp ? 1.0 : 0.0;
                 s.d0 = 1.0; s.d1 = 1.0;
                 c.sections[(size_t) c.numSections++] = s;
@@ -498,18 +546,58 @@ AnalogCascade analogPrototype (const DesignSpec& spec, double sampleRate) noexce
     return c;
 }
 
+SectionCoeffs designSectionBilinear (const AnalogSection& a, double w0) noexcept
+{
+    // Bilinear transform prewarped at w0: H(z) = Ha(s) with s = j*tan(w/2)/tan(w0/2). Maps the whole analog
+    // frequency axis monotonically onto 0..Nyquist, so every shape property of the prototype is preserved.
+    SectionCoeffs s;
+    const double t0 = std::tan (0.5 * w0);
+    s.order = a.order;
+    if (a.order == 1)
+    {
+        s.g = t0 * a.d0 / a.d1;
+        s.k = 0.0;
+        s.clp = a.n0 / a.d0;
+        s.cbp = 0.0;
+        s.chp = a.n1 / a.d1;
+    }
+    else
+    {
+        const double wp = std::sqrt (a.d0 / a.d2);
+        s.g = t0 * wp;
+        s.k = a.d1 / std::sqrt (a.d0 * a.d2);
+        s.clp = a.n0 / a.d0;
+        s.cbp = a.n1 * wp / a.d0;
+        s.chp = a.n2 / a.d2;
+    }
+    s.clp *= a.scale;
+    s.cbp *= a.scale;
+    s.chp *= a.scale;
+    return s;
+}
+
+double bilinearBlendWeight (double designFreqHz, double sampleRate) noexcept
+{
+    // 0 below 0.25 fs (pure analog-matched design), 1 above 0.40 fs (pure bilinear), smoothstep in between.
+    const double t = clampValue ((designFreqHz / sampleRate - 0.25) / (0.40 - 0.25), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
 CascadeCoeffs designCascade (const DesignSpec& spec, double sampleRate) noexcept
 {
     const AnalogCascade ac = analogPrototype (spec, sampleRate);
     const double w0 = kTwoPi * ac.designFreqHz / sampleRate;
+    const double blend = bilinearBlendWeight (ac.designFreqHz, sampleRate);
 
     CascadeCoeffs cc;
     cc.numSections = ac.numSections;
     bool ok = true;
     for (int i = 0; i < ac.numSections; ++i)
     {
-        cc.sections[(size_t) i] = designSection (ac.sections[(size_t) i], w0);
-        ok = ok && cc.sections[(size_t) i].isFiniteAndStable();
+        const auto& a = ac.sections[(size_t) i];
+        auto& s = cc.sections[(size_t) i];
+        s = designSection (a, w0, blend);
+        ok = ok && s.isFiniteAndStable();
     }
 
     cc.identity = typeUsesGain (spec.type) && std::abs (spec.gainDb) < 1e-9;

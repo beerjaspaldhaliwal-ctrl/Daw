@@ -6,6 +6,14 @@
 //   -> 16 serial bands -> band audition (monitoring only) -> output trim -> bypass crossfade with dry
 //   -> mono-compatibility audition (monitoring only) -> non-finite guard -> output meter -> post analyzer tap
 //
+// Auto gain (optional, off by default): the output is offset by the negative of the EQ's *static* loudness
+// change, estimated as the pink-noise-weighted power gain of the combined curve (48 log-spaced points,
+// 20 Hz - 20 kHz). Dynamic gain changes are deliberately not compensated. The applied value is published
+// for the UI so the behaviour is always visible.
+//
+// Level comparison: input and output RMS (3 s time constant) are published so the UI can show the level
+// difference and offer a one-click, undoable output-trim match.
+//
 // Everything runs in double precision. No allocation, locks or I/O happen in process().
 #pragma once
 
@@ -25,6 +33,7 @@ struct EngineSettings
     double inputTrimDb = 0.0;
     double outputTrimDb = 0.0;
     bool bypass = false;
+    bool autoGain = false;     // compensate the EQ curve's static loudness change (see AutoGain notes below)
     int auditionBand = -1;     // monitoring only: >= 0 solos that band's frequency region
     bool monoAudition = false; // monitoring only: fold output to mono
 };
@@ -79,6 +88,13 @@ public:
     void resetClip() noexcept { clipFlag.store (false, std::memory_order_relaxed); }
     int getNonFiniteEvents() const noexcept { return nonFiniteEvents.load (std::memory_order_relaxed); }
 
+    float getAutoGainDb() const noexcept { return autoGainForUi.load (std::memory_order_relaxed); }
+    float getInputRmsDb() const noexcept { return inRmsDb.load (std::memory_order_relaxed); }
+    float getOutputRmsDb() const noexcept { return outRmsDb.load (std::memory_order_relaxed); }
+
+    // Exposed for tests: the compensation the auto-gain stage targets for the current settings.
+    double computeAutoGainDb() noexcept;
+
     float getBandDynamicGainDb (int band) const noexcept { return bands[(size_t) band].getDynamicGainDb(); }
     float getBandDetectorLevelDb (int band) const noexcept { return bands[(size_t) band].getDetectorLevelDb(); }
     const BandProcessor& getBand (int band) const noexcept { return bands[(size_t) band]; }
@@ -111,6 +127,21 @@ private:
 
     AnalyzerTap* preTap = nullptr;
     AnalyzerTap* postTap = nullptr;
+
+    static constexpr int kAutoGainPoints = 48;
+    struct AutoGainBandCache
+    {
+        BandSettings settings;
+        bool valid = false;
+        bool identity = true;
+        std::array<double, kAutoGainPoints> power {};
+    };
+    std::array<AutoGainBandCache, kNumBands> agCache;
+    std::array<double, kAutoGainPoints> agOmega {};
+    double autoGainDb = 0.0;
+    std::atomic<float> autoGainForUi { 0.0f };
+    double msIn = 0.0, msOut = 0.0;
+    std::atomic<float> inRmsDb { -200.0f }, outRmsDb { -200.0f };
 
     std::array<std::atomic<float>, 2> inPeak { 0.0f, 0.0f };
     std::array<std::atomic<float>, 2> outPeak { 0.0f, 0.0f };

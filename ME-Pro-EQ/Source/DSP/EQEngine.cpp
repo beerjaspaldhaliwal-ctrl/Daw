@@ -55,6 +55,13 @@ void EQEngine::prepare (double newSampleRate, int maxBlockSize, int numChannels)
         b.prepare (sampleRate, controlPeriod);
 
     trimCoef = std::exp (-1.0 / (kTrimSmoothingSec * sampleRate));
+    {
+        const double hi = std::min (20000.0, kMaxDesignFreqRatio * sampleRate);
+        for (int i = 0; i < kAutoGainPoints; ++i)
+            agOmega[(size_t) i] = kTwoPi * (20.0 * std::pow (hi / 20.0, (double) i / (kAutoGainPoints - 1))) / sampleRate;
+        for (auto& c : agCache)
+            c.valid = false;
+    }
     bypassLen = std::max (1, (int) std::lround (kBypassFadeSec * sampleRate));
     auditionLen = std::max (1, (int) std::lround (kAuditionFadeSec * sampleRate));
     reset();
@@ -70,7 +77,9 @@ void EQEngine::reset() noexcept
         bands[i].setSettings (settings.bands[i]);
 
     inGain = dbToGain (clampValue (settings.inputTrimDb, kTrimMinDb, kTrimMaxDb));
-    outGain = dbToGain (clampValue (settings.outputTrimDb, kTrimMinDb, kTrimMaxDb));
+    autoGainDb = settings.autoGain ? computeAutoGainDb() : 0.0;
+    outGain = dbToGain (clampValue (settings.outputTrimDb + autoGainDb, 2 * kTrimMinDb, 2 * kTrimMaxDb));
+    msIn = msOut = 0.0;
     bypassPos = settings.bypass ? bypassLen : 0;
 
     SectionLayout l;
@@ -199,8 +208,10 @@ void EQEngine::processInterleaved (int nch, int n, const double* sc, int scCh) n
     // 4. Band audition (monitoring only).
     applyAudition (nch, n);
 
-    // 5. Output trim.
-    const double outTarget = dbToGain (clampValue (settings.outputTrimDb, kTrimMinDb, kTrimMaxDb));
+    // 5. Output trim (+ optional auto gain).
+    autoGainDb = settings.autoGain ? computeAutoGainDb() : 0.0;
+    autoGainForUi.store ((float) autoGainDb, std::memory_order_relaxed);
+    const double outTarget = dbToGain (clampValue (settings.outputTrimDb, kTrimMinDb, kTrimMaxDb) + autoGainDb);
     if (outGain != outTarget || outTarget != 1.0)
     {
         for (int i = 0; i < n; ++i)
@@ -267,8 +278,88 @@ void EQEngine::processInterleaved (int nch, int n, const double* sc, int scCh) n
             clipFlag.store (true, std::memory_order_relaxed);
     }
 
+    // Level comparison: RMS of input and output (mean over channels), 3 s time constant.
+    {
+        double si = 0.0, so = 0.0;
+        for (int j = 0; j < ns; ++j)
+        {
+            si += dry[(size_t) j] * dry[(size_t) j];
+            so += x[j] * x[j];
+        }
+        const double a = std::exp (-(double) n / (3.0 * sampleRate));
+        msIn = si / ns + (msIn - si / ns) * a;
+        msOut = so / ns + (msOut - so / ns) * a;
+        inRmsDb.store ((float) powerToDb (msIn, -200.0), std::memory_order_relaxed);
+        outRmsDb.store ((float) powerToDb (msOut, -200.0), std::memory_order_relaxed);
+    }
+
     if (postTap != nullptr)
         postTap->push (x, nch, n);
+}
+
+double EQEngine::computeAutoGainDb() noexcept
+{
+    // Update the per-band power responses that changed (designs are allocation-free).
+    for (int b = 0; b < kNumBands; ++b)
+    {
+        const auto& s = settings.bands[(size_t) b];
+        auto& c = agCache[(size_t) b];
+        const bool same = c.valid && c.settings.active == s.active && c.settings.type == s.type
+                       && sameValue (c.settings.freqHz, s.freqHz) && sameValue (c.settings.gainDb, s.gainDb)
+                       && sameValue (c.settings.q, s.q) && c.settings.slopeIndex == s.slopeIndex && c.settings.stereo == s.stereo;
+        if (same)
+            continue;
+        c.settings = s;
+        c.valid = true;
+        c.identity = ! s.active;
+        if (s.active)
+        {
+            const auto cc = designCascade ({ s.type, s.freqHz, s.gainDb, s.q, s.slopeIndex }, sampleRate);
+            for (int i = 0; i < kAutoGainPoints; ++i)
+                c.power[(size_t) i] = std::norm (cc.response (agOmega[(size_t) i]));
+        }
+    }
+
+    bool lr = false, ms = false;
+    for (const auto& c : agCache)
+        if (! c.identity)
+        {
+            lr = lr || c.settings.stereo == StereoMode::Left || c.settings.stereo == StereoMode::Right;
+            ms = ms || c.settings.stereo == StereoMode::Mid || c.settings.stereo == StereoMode::Side;
+        }
+
+    double sum = 0.0;
+    for (int i = 0; i < kAutoGainPoints; ++i)
+    {
+        // Per channel-domain power gain (channels assumed uncorrelated, equal energy).
+        double st = 1.0, l = 1.0, r = 1.0, m = 1.0, sd = 1.0;
+        for (const auto& c : agCache)
+        {
+            if (c.identity)
+                continue;
+            const double p = c.power[(size_t) i];
+            switch (c.settings.stereo)
+            {
+                case StereoMode::Stereo:   st *= p; break;
+                case StereoMode::Left:     l *= p; break;
+                case StereoMode::Right:    r *= p; break;
+                case StereoMode::Mid:      m *= p; break;
+                case StereoMode::Side:     sd *= p; break;
+                case StereoMode::NumModes: break;
+            }
+        }
+        double g;
+        if (lr && ms)
+            g = st * (l + r + m + sd) * 0.25;
+        else if (lr)
+            g = st * (l + r) * 0.5;
+        else if (ms)
+            g = st * (m + sd) * 0.5;
+        else
+            g = st;
+        sum += g;
+    }
+    return clampValue (-powerToDb (sum / kAutoGainPoints, -200.0), kTrimMinDb, kTrimMaxDb);
 }
 
 void EQEngine::applyAudition (int nch, int n) noexcept

@@ -101,7 +101,10 @@ CascadeCoeffs designCascade (const DesignSpec& spec, double sampleRate) noexcept
 std::complex<double> analogPrototypeResponse (const DesignSpec& spec, double sampleRate, double freqHz) noexcept;
 
 // Section-level building blocks (exposed for the dynamic-EQ detector and the tests).
-SectionCoeffs designSection (const AnalogSection& section, double w0) noexcept;
+SectionCoeffs designSection (const AnalogSection& section, double w0, double bilinearBlend = 0.0) noexcept;
+SectionCoeffs designSectionBilinear (const AnalogSection& section, double w0) noexcept;
+// Weight of the bilinear design in the final coefficients (0 = analog-matched, 1 = bilinear).
+double bilinearBlendWeight (double designFreqHz, double sampleRate) noexcept;
 SectionCoeffs invertSection (const SectionCoeffs& s) noexcept;
 void polesToSvf (double poleW, double zeta, double& g, double& k) noexcept;
 

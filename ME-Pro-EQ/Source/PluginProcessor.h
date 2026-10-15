@@ -4,7 +4,11 @@
 
 #include "DSP/EQEngine.h"
 #include "DSP/SpectrumAnalyzer.h"
+#include "State/ABComparison.h"
 #include "State/ParameterLayout.h"
+#include "State/ParameterSnapshot.h"
+#include "State/PresetManager.h"
+#include "State/UndoHistory.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -67,15 +71,27 @@ public:
     // Non-parameter UI state stored inside the plugin state (selected band, display range, window size).
     juce::ValueTree getUiState();
 
-    // Serialises / restores the complete state (used by getStateInformation, presets and A/B).
+    // Serialises / restores the complete state (parameters, A/B slots, preset name, UI state).
     juce::ValueTree createStateTree();
     bool restoreStateTree (const juce::ValueTree& tree);
+
+    // Message-thread services. Lock getStateLock() while mutating A/B or preset state.
+    mepro::state::ParameterSnapshotter& getSnapshotter() noexcept { return snapshotter; }
+    mepro::state::UndoHistory& getUndoHistory() noexcept { return undo; }
+    mepro::state::ABComparison& getAB() noexcept { return ab; }
+    mepro::state::PresetManager& getPresets() noexcept { return presets; }
+    juce::CriticalSection& getStateLock() noexcept { return stateLock; }
 
 private:
     template <typename SampleType>
     void processInternal (juce::AudioBuffer<SampleType>& buffer);
 
     juce::AudioProcessorValueTreeState apvts;
+    mepro::state::ParameterSnapshotter snapshotter { *this, mepro::params::id::bypass };
+    mepro::state::UndoHistory undo { snapshotter };
+    mepro::state::ABComparison ab { snapshotter, undo };
+    mepro::state::PresetManager presets { snapshotter, undo };
+    juce::CriticalSection stateLock;
     mepro::params::ParameterReader reader;
     mepro::dsp::EQEngine engine;
     mepro::dsp::EngineSettings settings;

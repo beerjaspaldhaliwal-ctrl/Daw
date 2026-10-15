@@ -528,3 +528,78 @@ ME_TEST ("Engine", RenderStartIsFullyProcessed)
     measure ("first 8192 samples after reset vs ideal filter from zero state: max diff", maxDiff);
     CHECK (maxDiff < 1e-15);
 }
+
+ME_TEST ("Engine", AutoGainMatchesPinkNoiseLoudness)
+{
+    // With auto gain on, pink noise through the EQ keeps (approximately) its RMS level; off, it does not.
+    const double fs = 48000.0;
+    struct Case { const char* name; EngineSettings st; };
+    std::vector<Case> cases;
+    {
+        Case c { "bell +6 dB 1 kHz Q1", {} };
+        c.st.bands[0] = bell (1000, 6, 1.0);
+        cases.push_back (c);
+        Case d { "low shelf -6 dB 200 Hz + high shelf +4 dB 8 kHz", {} };
+        d.st.bands[0] = band (FilterType::LowShelf, 200, -6, kButterworthQ, 1);
+        d.st.bands[1] = band (FilterType::HighShelf, 8000, 4, kButterworthQ, 1);
+        cases.push_back (d);
+        Case e { "side-only bell +9 dB 3 kHz", {} };
+        e.st.bands[0] = bell (3000, 9, 0.7, StereoMode::Side);
+        cases.push_back (e);
+    }
+    const int n = (int) fs * 20;
+    // Pink noise band-limited to 20 Hz - 20 kHz (48 dB/oct), the range the auto-gain estimate covers.
+    auto bandLimit = [fs] (std::vector<double> x)
+    {
+        for (auto [t, f] : { std::pair { FilterType::HighPass, 20.0 }, std::pair { FilterType::LowPass, 20000.0 } })
+        {
+            SvfCascade c;
+            c.setLayout (sectionLayout (t, 5));
+            c.setCoefficients (designCascade ({ t, f, 0.0, kButterworthQ, 5 }, fs));
+            c.processMono (x.data(), (int) x.size(), 1, 0);
+        }
+        return x;
+    };
+    const auto pl = bandLimit (pinkNoise (n, 0.2, 31)), pr = bandLimit (pinkNoise (n, 0.2, 32));
+    for (auto& c : cases)
+    {
+        for (bool on : { false, true })
+        {
+            c.st.autoGain = on;
+            EQEngine e;
+            e.prepare (fs, 1024, 2);
+            e.setSettings (c.st);
+            e.reset();
+            Stereo s (pl, pr);
+            runEngine (e, s, 1024);
+            const double inR = std::sqrt (0.5 * (rms (pl) * rms (pl) + rms (pr) * rms (pr)));
+            const double outR = std::sqrt (0.5 * (rms (s.l) * rms (s.l) + rms (s.r) * rms (s.r)));
+            const double diff = db (outR / inR);
+            measure (std::string (c.name) + (on ? ": auto gain ON  " : ": auto gain OFF ") + "output/input RMS (dB)", diff);
+            if (on)
+            {
+                measure (std::string (c.name) + ": applied compensation (dB)", e.getAutoGainDb());
+                CHECK_MSG (std::abs (diff) < 0.5, c.name << " residual " << diff);
+            }
+        }
+    }
+    // Off by default and exactly transparent when off.
+    EngineSettings def;
+    CHECK (! def.autoGain);
+}
+
+ME_TEST ("Engine", LevelComparisonReadout)
+{
+    const double fs = 48000.0;
+    EngineSettings st;
+    st.outputTrimDb = 4.5;
+    EQEngine e;
+    e.prepare (fs, 512, 2);
+    e.setSettings (st);
+    e.reset();
+    Stereo s (pinkNoise ((int) fs * 15, 0.2, 40), pinkNoise ((int) fs * 15, 0.2, 41));
+    runEngine (e, s, 512);
+    const double delta = e.getOutputRmsDb() - e.getInputRmsDb();
+    measure ("output trim +4.5 dB: published out-in RMS difference (dB)", delta);
+    CHECK_NEAR (delta, 4.5, 0.05);
+}

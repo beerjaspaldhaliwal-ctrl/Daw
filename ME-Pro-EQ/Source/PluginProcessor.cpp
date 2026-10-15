@@ -153,6 +153,9 @@ juce::ValueTree MEProEQAudioProcessor::createStateTree()
     auto state = apvts.copyState();
     state.setProperty ("pluginVersion", JucePlugin_VersionString, nullptr);
     state.setProperty ("stateVersion", kStateVersion, nullptr);
+    const juce::ScopedLock sl (stateLock);
+    ab.storeTo (state);
+    presets.storeTo (state);
     return state;
 }
 
@@ -179,6 +182,13 @@ bool MEProEQAudioProcessor::restoreStateTree (const juce::ValueTree& source)
         }
     }
     apvts.replaceState (tree);
+    {
+        const juce::ScopedLock sl (stateLock);
+        ab.loadFrom (tree);
+        ab.clearHistories();
+        presets.loadFrom (tree);
+        undo.clear();
+    }
     return true;
 }
 

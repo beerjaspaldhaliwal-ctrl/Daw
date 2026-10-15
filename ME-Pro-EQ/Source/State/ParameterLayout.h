@@ -20,6 +20,7 @@ namespace id
     inline constexpr const char* inputTrim = "inGain";
     inline constexpr const char* outputTrim = "outGain";
     inline constexpr const char* bypass = "bypass";
+    inline constexpr const char* autoGain = "autoGain";
 } // namespace id
 
 enum class BandParam : int
@@ -73,6 +74,7 @@ private:
     std::atomic<float>* inTrim = nullptr;
     std::atomic<float>* outTrim = nullptr;
     std::atomic<float>* bypassRaw = nullptr;
+    std::atomic<float>* autoGainRaw = nullptr;
     std::array<std::array<std::atomic<float>*, kNumBandParams>, dsp::kNumBands> band_ {};
 };
 

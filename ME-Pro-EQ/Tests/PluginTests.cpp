@@ -23,9 +23,9 @@ ME_TEST ("Plugin", ParameterSetIsStable)
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
             ids.insert (rp->paramID);
     measure ("host parameters", (double) prms.size());
-    CHECK (prms.size() == 3 + 16 * mepro::params::kNumBandParams);
+    CHECK (prms.size() == 4 + 16 * mepro::params::kNumBandParams); // in/out trim, bypass, auto gain + 16 bands
     CHECK ((int) ids.size() == prms.size()); // unique IDs
-    for (const char* id : { "inGain", "outGain", "bypass", "b1_used", "b1_freq", "b16_sc", "b8_range", "b12_slope" })
+    for (const char* id : { "inGain", "outGain", "bypass", "autoGain", "b1_used", "b1_freq", "b16_sc", "b8_range", "b12_slope" })
         CHECK_MSG (ids.count (id) == 1, "missing parameter " << id);
     CHECK (p.getBypassParameter() != nullptr && dynamic_cast<juce::RangedAudioParameter*> (p.getBypassParameter())->paramID == "bypass");
     // Every parameter is automatable and has a readable name and value text.
