@@ -14,12 +14,12 @@ namespace
 {
     int controlPeriodForRate (double fs) noexcept
     {
-        // Fine period ~0.083 ms at every rate: 4 samples at 44.1/48 kHz, 8 at 88.2/96 kHz, 16 at 176.4/192 kHz.
+        // Fine period ~0.17 ms at every rate: 8 samples at 44.1/48 kHz, 16 at 88.2/96 kHz, 32 at 176.4/192 kHz.
         const int mult = std::max (1, (int) std::lround (fs / 48000.0));
         int p = 1;
         while (p < mult)
             p <<= 1;
-        return 4 * p;
+        return 8 * p;
     }
 
     CascadeCoeffs designAuditionFilter (const BandSettings& b, double fs) noexcept

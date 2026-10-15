@@ -125,6 +125,9 @@ double effectiveDesignFrequency (double freqHz, double sampleRate) noexcept
 //==============================================================================
 namespace
 {
+    // A = 10^(dB/40) (the square root of the linear gain), via exp: noticeably cheaper than pow.
+    inline double dbToA (double gainDb) noexcept { return std::exp (gainDb * (2.302585092994045684 / 40.0)); }
+
     // Map the analog prototype's slope/resonance control to per-section Q values (highest-Q section first).
     // At the default Q (1/sqrt2) the result is an exact Butterworth distribution; other Q values scale the
     // most resonant section ("resonance"), limited to [0.1, maxQ].
@@ -142,7 +145,7 @@ namespace
 
     AnalogSection lowShelf2 (double gainDb, double q)
     {
-        const double A = std::pow (10.0, gainDb / 40.0), sA = std::sqrt (A);
+        const double A = dbToA (gainDb), sA = std::sqrt (A);
         AnalogSection s;
         s.n0 = A * A; s.n1 = A * sA / q; s.n2 = A;
         s.d0 = 1.0;   s.d1 = sA / q;     s.d2 = A;
@@ -151,7 +154,7 @@ namespace
 
     AnalogSection highShelf2 (double gainDb, double q)
     {
-        const double A = std::pow (10.0, gainDb / 40.0), sA = std::sqrt (A);
+        const double A = dbToA (gainDb), sA = std::sqrt (A);
         AnalogSection s;
         s.n0 = A; s.n1 = A * sA / q; s.n2 = A * A;
         s.d0 = A; s.d1 = sA / q;     s.d2 = 1.0;
@@ -161,7 +164,7 @@ namespace
     AnalogSection lowShelf1 (double gainDb)
     {
         // (s + A) / (s + 1/A): DC gain A^2, HF gain 1, |H(j1)| = A (half the dB gain at f0)
-        const double A = std::pow (10.0, gainDb / 40.0);
+        const double A = dbToA (gainDb);
         AnalogSection s;
         s.order = 1;
         s.n0 = A; s.n1 = 1.0; s.d0 = 1.0 / A; s.d1 = 1.0;
@@ -171,7 +174,7 @@ namespace
     AnalogSection highShelf1 (double gainDb)
     {
         // A^2 (s + 1/A) / (s + A): DC gain 1, HF gain A^2, |H(j1)| = A
-        const double A = std::pow (10.0, gainDb / 40.0);
+        const double A = dbToA (gainDb);
         AnalogSection s;
         s.order = 1;
         s.n0 = A; s.n1 = A * A; s.d0 = A; s.d1 = 1.0;
@@ -191,6 +194,7 @@ namespace
     }
 
     double sq (double x) noexcept { return x * x; }
+
 
     // Robust 2nd-order impulse-invariant pole mapping helpers ------------------------------------------
     constexpr double kAngleSoftStart = 0.9 * kPi;
@@ -415,7 +419,7 @@ AnalogCascade analogPrototype (const DesignSpec& spec, double sampleRate) noexce
     {
         case FilterType::Bell:
         {
-            const double A = std::pow (10.0, gainDb / 40.0);
+            const double A = dbToA (gainDb);
             AnalogSection s;
             s.n0 = 1.0; s.n1 = A / q;         s.n2 = 1.0;
             s.d0 = 1.0; s.d1 = 1.0 / (A * q); s.d2 = 1.0;
@@ -485,7 +489,7 @@ AnalogCascade analogPrototype (const DesignSpec& spec, double sampleRate) noexce
             const int order = filterOrderForSlopeIndex (std::min (spec.slopeIndex, kMaxShelfSlopeIndex));
             addShelfChain (c, spec.type != FilterType::LowShelf, order, gainDb, q);
             if (spec.type == FilterType::Tilt)
-                c.sections[0].scale = std::pow (10.0, -gainDb / 40.0); // -G/2 dB: LF = -G/2, HF = +G/2
+                c.sections[0].scale = dbToA (-gainDb); // -G/2 dB: LF = -G/2, HF = +G/2
             break;
         }
         default:

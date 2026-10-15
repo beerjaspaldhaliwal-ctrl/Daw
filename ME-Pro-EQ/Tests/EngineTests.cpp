@@ -496,3 +496,35 @@ ME_TEST ("Engine", FloatAndDoubleEntryPointsAgree)
     measure ("float path vs double path (after float rounding) max diff", maxDiff);
     CHECK (maxDiff == 0.0);
 }
+
+ME_TEST ("Engine", RenderStartIsFullyProcessed)
+{
+    // After prepare()/reset() (transport start, offline render) active bands apply from the very first
+    // sample: the output must equal the band filter run from zero state, sample for sample.
+    const double fs = 44100.0;
+    EngineSettings st;
+    st.bands[0] = bell (800, 9, 2.0);
+    st.bands[1] = band (FilterType::HighPass, 60, 0, kButterworthQ, 3);
+    EQEngine e;
+    e.prepare (fs, 256, 2);
+    e.setSettings (st);
+    e.reset();
+    auto x = whiteNoise (8192, 0.5, 500);
+    Stereo s (x, x);
+    runEngine (e, s, 256);
+
+    auto ref = x;
+    for (int b = 0; b < 2; ++b)
+    {
+        const auto& bs = st.bands[(size_t) b];
+        SvfCascade f;
+        f.setLayout (sectionLayout (bs.type, bs.slopeIndex));
+        f.setCoefficients (designCascade ({ bs.type, bs.freqHz, bs.gainDb, bs.q, bs.slopeIndex }, fs));
+        f.processMono (ref.data(), (int) ref.size(), 1, 0);
+    }
+    double maxDiff = 0.0;
+    for (size_t i = 0; i < ref.size(); ++i)
+        maxDiff = std::max (maxDiff, std::abs (s.l[i] - ref[i]));
+    measure ("first 8192 samples after reset vs ideal filter from zero state: max diff", maxDiff);
+    CHECK (maxDiff < 1e-15);
+}

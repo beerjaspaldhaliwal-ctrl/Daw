@@ -13,6 +13,11 @@
     #include <pmmintrin.h>
 #endif
 
+#if MEPROEQ_PLUGIN_TESTS
+    #include <juce_events/juce_events.h>
+    #include <juce_gui_basics/juce_gui_basics.h>
+#endif
+
 static void enableFlushToZero()
 {
     // Matches what the plugin wrapper does on the audio thread (juce::ScopedNoDenormals).
@@ -36,6 +41,11 @@ int main (int argc, char** argv)
     }
 
     enableFlushToZero();
+
+#if MEPROEQ_PLUGIN_TESTS
+    // Must outlive every JUCE object created by the tests and be destroyed before static destruction.
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+#endif
 
     auto& ctx = metest::Context::get();
     int run = 0, passed = 0, failed = 0;
@@ -75,6 +85,7 @@ int main (int argc, char** argv)
         results.push_back ({ full, ctx.currentFailed ? "FAIL" : "PASS" });
         times.push_back (secs);
         std::printf ("[ %s ] %s (%.2f s)\n", ctx.currentFailed ? "FAIL" : " OK ", full.c_str(), secs);
+        std::fflush (stdout);
     }
 
     if (list)

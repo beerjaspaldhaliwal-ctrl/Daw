@@ -53,6 +53,7 @@ void BandProcessor::reset() noexcept
     detector.reset();
     snapSmoothing();
     lastDesignedType = FilterType::NumTypes;
+    settleOnFirstTick = true;
     dynGainForUi.store (0.0f, std::memory_order_relaxed);
     detLevelForUi.store (-200.0f, std::memory_order_relaxed);
 }
@@ -63,22 +64,44 @@ bool BandProcessor::dynamicsActive() const noexcept
         && typeSupportsDynamics (slots[activeSlot].type);
 }
 
-void BandProcessor::snapSmoothing() noexcept
+void BandProcessor::refreshTargetCache() noexcept
 {
-    smLog2Freq = targetLog2Freq (target);
-    smGainDb = targetGain (target);
-    smLogQ = targetLogQ (target);
+    // Perceptual-domain targets are recomputed only when the raw parameter values change.
+    if (! sameValue (target.freqHz, cachedFreq) || ! sameValue (target.q, cachedQ) || ! sameValue (target.gainDb, cachedGain))
+    {
+        cachedFreq = target.freqHz;
+        cachedQ = target.q;
+        cachedGain = target.gainDb;
+        tgtLog2Freq = targetLog2Freq (target);
+        tgtGainDb = targetGain (target);
+        tgtLogQ = targetLogQ (target);
+    }
 }
 
-DesignSpec BandProcessor::currentSpec (double extraGainDb) const noexcept
+void BandProcessor::snapSmoothing() noexcept
+{
+    refreshTargetCache();
+    smLog2Freq = tgtLog2Freq;
+    smGainDb = tgtGainDb;
+    smLogQ = tgtLogQ;
+}
+
+DesignSpec BandProcessor::currentSpec (double extraGainDb) noexcept
 {
     const auto& slot = slots[activeSlot];
+    if (! sameValue (smLog2Freq, specLog2F) || ! sameValue (smLogQ, specLogQ))
+    {
+        specLog2F = smLog2Freq;
+        specLogQ = smLogQ;
+        specFreq = std::exp2 (smLog2Freq);
+        specQ = std::exp (smLogQ);
+    }
     DesignSpec spec;
     spec.type = slot.type;
     spec.slopeIndex = slot.slopeIndex;
-    spec.freqHz = std::exp2 (smLog2Freq);
+    spec.freqHz = specFreq;
     spec.gainDb = clampValue (smGainDb + extraGainDb, -kMaxCombinedGainDb, kMaxCombinedGainDb);
-    spec.q = std::exp (smLogQ);
+    spec.q = specQ;
     return spec;
 }
 
@@ -114,6 +137,8 @@ void BandProcessor::releaseBand() noexcept
 void BandProcessor::coarseTick() noexcept
 {
     bool forceImmediate = false;
+    const bool settle = settleOnFirstTick;
+    settleOnFirstTick = false;
 
     // 1. Activation / deactivation -------------------------------------------------------------------
     if (state == State::Idle)
@@ -129,8 +154,10 @@ void BandProcessor::coarseTick() noexcept
         detector.reset();
         configureSlot (slots[0]);
         crossfadeLen = crossfadePos = 0;
-        fadePos = 0;
-        fadeDir = 1;
+        // Right after a reset (transport start, offline render) the band is applied immediately;
+        // enabling a band during playback fades it in.
+        fadePos = settle ? fadeLength : 0;
+        fadeDir = settle ? 0 : 1;
         state = State::Active;
         forceImmediate = true;
     }
@@ -179,26 +206,30 @@ void BandProcessor::updateResponse (bool fineRate, bool forceImmediate) noexcept
         if (std::abs (v - t) < eps)
             v = t;
     };
-    smooth (smLog2Freq, targetLog2Freq (target), 1e-7);
-    smooth (smGainDb, targetGain (target), 1e-6);
-    smooth (smLogQ, targetLogQ (target), 1e-7);
+    refreshTargetCache();
+    smooth (smLog2Freq, tgtLog2Freq, 1e-7);
+    smooth (smGainDb, tgtGainDb, 1e-6);
+    smooth (smLogQ, tgtLogQ, 1e-7);
 
     // Dynamics
     const auto& slot = slots[activeSlot];
     const bool dynOn = dynamicsActive();
     if (dynOn)
     {
-        detector.setFilter (slot.type, std::exp2 (smLog2Freq), std::exp (smLogQ));
+        const auto ds = currentSpec (0.0);
+        detector.setFilter (slot.type, ds.freqHz, ds.q);
         detector.setTiming (target.dyn.attackMs, target.dyn.releaseMs, target.dyn.detector);
     }
     dynGainDb = dynOn ? dynamicGainForLevel (detector.levelDb(), target.dyn) : 0.0;
     dynGainForUi.store ((float) dynGainDb, std::memory_order_relaxed);
     detLevelForUi.store (dynOn ? (float) detector.levelDb() : -200.0f, std::memory_order_relaxed);
 
-    // Redesign when anything that affects the response changed.
+    // Redesign when anything that affects the response changed. (Deferring small dynamic-gain movements was
+    // evaluated and rejected: it staircases the coefficient trajectory and raises zipper products.)
     const DesignSpec spec = currentSpec (dynGainDb);
     if (forceImmediate || spec.type != lastDesignedType || spec.slopeIndex != lastDesignedSlope
-        || smLog2Freq != lastDesignedLog2F || smLogQ != lastDesignedLogQ || spec.gainDb != lastDesignedGain)
+        || ! sameValue (smLog2Freq, lastDesignedLog2F) || ! sameValue (smLogQ, lastDesignedLogQ)
+        || ! sameValue (spec.gainDb, lastDesignedGain))
     {
         const CascadeCoeffs c = designCascade (spec, sampleRate);
         auto& s = slots[activeSlot];
@@ -329,8 +360,9 @@ void BandProcessor::process (double* buffer, int numChannels, int numSamples,
         // Steady state: nothing will change before the end of this block -> one chunk.
         const bool steady = state == State::Active && fadeDir == 0 && fadePos == fadeLength && crossfadeLen == 0
                          && ! dynamicsActive() && ! slots[activeSlot].filter.isRamping()
-                         && smLog2Freq == targetLog2Freq (target) && smGainDb == targetGain (target)
-                         && smLogQ == targetLogQ (target) && target.active && ! structureDiffers (slots[activeSlot])
+                         && sameValue (target.freqHz, cachedFreq) && sameValue (target.q, cachedQ) && sameValue (target.gainDb, cachedGain)
+                         && sameValue (smLog2Freq, tgtLog2Freq) && sameValue (smGainDb, tgtGainDb) && sameValue (smLogQ, tgtLogQ)
+                         && target.active && ! structureDiffers (slots[activeSlot])
                          && slots[activeSlot].slopeIndex == target.slopeIndex;
 
         int m;

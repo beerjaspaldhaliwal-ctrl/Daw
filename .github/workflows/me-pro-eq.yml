@@ -1,0 +1,154 @@
+name: ME Pro EQ
+
+on:
+  push:
+    paths:
+      - "ME-Pro-EQ/**"
+      - ".github/workflows/me-pro-eq.yml"
+  pull_request:
+    paths:
+      - "ME-Pro-EQ/**"
+      - ".github/workflows/me-pro-eq.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: me-pro-eq-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64 (MSVC) - build, test, validate, package
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (Visual Studio 2022, x64)
+        run: cmake -S ME-Pro-EQ -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: DSP test suite
+        working-directory: build
+        run: |
+          ./Release/meproeq_dsp_tests.exe --report reports/dsp_test_report.md
+          if ($LASTEXITCODE -ne 0) { throw "DSP tests failed" }
+
+      - name: Plugin (host-level) test suite
+        working-directory: build
+        run: |
+          ./Release/meproeq_plugin_tests.exe --report reports/plugin_test_report.md
+          if ($LASTEXITCODE -ne 0) { throw "Plugin tests failed" }
+
+      - name: CPU benchmark
+        working-directory: build
+        run: |
+          ./Release/meproeq_benchmark.exe --seconds 10 --rate 48000 --block 256 --markdown reports/benchmark_windows_48k_256.md
+          ./Release/meproeq_benchmark.exe --seconds 5 --rate 44100 --block 128 --markdown reports/benchmark_windows_44k1_128.md
+          Get-Content reports/benchmark_windows_48k_256.md
+
+      - name: pluginval (strictness 10)
+        run: |
+          Invoke-WebRequest -Uri https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval -Force
+          New-Item -ItemType Directory -Force build/reports/pluginval | Out-Null
+          ./pluginval/pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 1200000 `
+            --output-dir build/reports/pluginval --validate "build/MEProEQ_artefacts/Release/VST3/ME Pro EQ.vst3" `
+            *> build/reports/pluginval/pluginval_windows_strict10.log
+          $code = $LASTEXITCODE
+          Get-Content build/reports/pluginval/pluginval_windows_strict10.log | Select-String -Pattern "Starting tests in|FAILED|SUCCESS|WARNING|ERROR"
+          if ($code -ne 0) { throw "pluginval failed with exit code $code" }
+
+      - name: Steinberg VST3 validator (SDK 3.8.0)
+        run: |
+          git clone --quiet --depth 1 --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk.git vst3sdk
+          git -C vst3sdk submodule update --init --depth 1 base pluginterfaces public.sdk cmake
+          cmake -S vst3sdk -B vst3sdk/build -A x64 -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF `
+            -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=ON -DSMTG_RUN_VST_VALIDATOR=OFF -DSMTG_CREATE_PLUGIN_LINK=OFF
+          cmake --build vst3sdk/build --config Release --target validator --parallel
+          $validator = Get-ChildItem -Recurse vst3sdk/build -Filter validator.exe | Select-Object -First 1
+          & $validator.FullName -e "build/MEProEQ_artefacts/Release/VST3/ME Pro EQ.vst3" *> build/reports/pluginval/steinberg_validator_windows.log
+          $code = $LASTEXITCODE
+          Get-Content build/reports/pluginval/steinberg_validator_windows.log | Select-String -Pattern "Result:|ERROR"
+          if ($code -ne 0) { throw "Steinberg validator failed with exit code $code" }
+
+      - name: Build installer (Inno Setup) - only reached when all validation passed
+        run: |
+          if (-not (Get-Command iscc.exe -ErrorAction SilentlyContinue)) {
+            choco install innosetup --no-progress -y | Out-Null
+          }
+          $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe" }
+          $version = (Select-String -Path ME-Pro-EQ/CMakeLists.txt -Pattern 'project\(MEProEQ VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          $bundle = Resolve-Path "build/MEProEQ_artefacts/Release/VST3/ME Pro EQ.vst3"
+          New-Item -ItemType Directory -Force build/installer | Out-Null
+          $out = Resolve-Path build/installer
+          & $iscc "/DAppVersion=$version" "/DBundleDir=$bundle" "/DOutputDir=$out" ME-Pro-EQ/Installer/MEProEQ.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          Get-ChildItem build/installer | Format-Table Name, Length
+
+      - name: Upload VST3 + installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ME-Pro-EQ-windows-x64
+          path: |
+            build/MEProEQ_artefacts/Release/VST3/
+            build/installer/
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ME-Pro-EQ-windows-reports
+          path: build/reports/
+
+  linux:
+    name: Linux x64 (GCC) - build, test, validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+            libxext-dev libxrender-dev libxcomposite-dev libxi-dev libfreetype-dev libfontconfig1-dev libgl-dev xvfb
+
+      - name: Configure
+        run: cmake -S ME-Pro-EQ -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: DSP test suite
+        working-directory: build
+        run: ./meproeq_dsp_tests --report reports/dsp_test_report.md
+
+      - name: Plugin (host-level) test suite
+        working-directory: build
+        run: ./meproeq_plugin_tests --report reports/plugin_test_report.md
+
+      - name: pluginval (strictness 10, headless)
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Linux.zip
+          unzip -q pluginval.zip -d pluginval
+          mkdir -p build/reports/pluginval
+          xvfb-run -a -s "-screen 0 1920x1080x24" ./pluginval/pluginval --strictness-level 10 --validate-in-process \
+            --timeout-ms 1200000 --output-dir build/reports/pluginval \
+            --validate "build/MEProEQ_artefacts/Release/VST3/ME Pro EQ.vst3" > build/reports/pluginval/pluginval_linux_strict10.log 2>&1
+          tail -3 build/reports/pluginval/pluginval_linux_strict10.log
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ME-Pro-EQ-linux-reports
+          path: build/reports/

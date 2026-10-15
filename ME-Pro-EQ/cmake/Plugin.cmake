@@ -1,0 +1,90 @@
+# ME Pro EQ — JUCE plugin target (VST3).
+#
+# Plugin identity — NEVER change these once released: hosts and saved projects identify the plugin by them.
+#   Manufacturer code "MeAu", plugin code "MePq" -> JUCE derives the VST3 component/controller UIDs from them.
+
+juce_add_plugin(MEProEQ
+    COMPANY_NAME "ME Audio"
+    COMPANY_COPYRIGHT "Copyright (c) ME Audio"
+    PLUGIN_MANUFACTURER_CODE MeAu
+    PLUGIN_CODE MePq
+    FORMATS VST3
+    PRODUCT_NAME "ME Pro EQ"
+    PLUGIN_NAME "ME Pro EQ"
+    DESCRIPTION "Professional 16-band dynamic equalizer"
+    VERSION ${PROJECT_VERSION}
+    BUNDLE_ID com.meaudio.meproeq
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    VST3_CATEGORIES Fx EQ
+    COPY_PLUGIN_AFTER_BUILD FALSE
+)
+
+set(MEPROEQ_PLUGIN_SOURCES
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    Source/State/ParameterLayout.cpp
+    Source/UI/LookAndFeel.cpp
+    Source/UI/ValueKnob.cpp
+    Source/UI/EditorModel.cpp
+    Source/UI/SpectrumView.cpp
+    Source/UI/EQGraph.cpp
+    Source/UI/BandControls.cpp
+    Source/UI/Metering.cpp
+    Source/UI/HeaderBar.cpp
+)
+target_sources(MEProEQ PRIVATE ${MEPROEQ_PLUGIN_SOURCES})
+target_include_directories(MEProEQ PRIVATE Source)
+
+target_compile_definitions(MEProEQ PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_STRICT_REFCOUNTEDPOINTER=1
+    JUCE_MODAL_LOOPS_PERMITTED=0
+    DONT_SET_USING_JUCE_NAMESPACE=1
+)
+
+target_link_libraries(MEProEQ
+    PRIVATE
+        meproeq_dsp
+        juce::juce_audio_processors
+        juce::juce_gui_basics
+        juce::juce_gui_extra
+        juce::juce_recommended_warning_flags
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+)
+
+# Host-level tests: instantiate the real AudioProcessor (state, parameters, buses, rendering, editor).
+if(MEPROEQ_BUILD_TESTS)
+    add_executable(meproeq_plugin_tests
+        Tests/TestMain.cpp
+        Tests/PluginTests.cpp
+        Tests/StateTests.cpp
+    )
+    target_include_directories(meproeq_plugin_tests PRIVATE Tests Source
+        $<TARGET_PROPERTY:MEProEQ,INCLUDE_DIRECTORIES>)
+    # JUCE module targets inject their sources into whoever links them, so the test executable re-uses the
+    # already-compiled shared-code library and only inherits its include paths and definitions.
+    target_compile_definitions(meproeq_plugin_tests PRIVATE $<TARGET_PROPERTY:MEProEQ,COMPILE_DEFINITIONS>)
+    target_link_libraries(meproeq_plugin_tests PRIVATE MEProEQ meproeq_dsp)
+    target_compile_definitions(meproeq_plugin_tests PRIVATE MEPROEQ_PLUGIN_TESTS=1)
+    add_test(NAME plugin_tests COMMAND meproeq_plugin_tests --report ${CMAKE_BINARY_DIR}/reports/plugin_test_report.md)
+endif()
+
+# CPU benchmark (measures the real AudioProcessor).
+if(MEPROEQ_BUILD_BENCHMARKS)
+    add_executable(meproeq_benchmark Benchmarks/Benchmark.cpp)
+    target_include_directories(meproeq_benchmark PRIVATE Source $<TARGET_PROPERTY:MEProEQ,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(meproeq_benchmark PRIVATE $<TARGET_PROPERTY:MEProEQ,COMPILE_DEFINITIONS>)
+    target_link_libraries(meproeq_benchmark PRIVATE MEProEQ meproeq_dsp)
+    if(WIN32)
+        target_link_libraries(meproeq_benchmark PRIVATE psapi)
+    endif()
+endif()

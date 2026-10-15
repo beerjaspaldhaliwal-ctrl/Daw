@@ -11,10 +11,10 @@
 //  * stereo routing: Stereo (linked), Left, Right, Mid, Side;
 //  * dynamic EQ: frequency-selective detector -> gain computer -> gain added to the static band gain.
 //
-// Control grid: a "fine" tick every finePeriod samples (~0.083 ms) and a "coarse" tick every
+// Control grid: a "fine" tick every finePeriod samples (~0.17 ms) and a "coarse" tick every
 // kFinePerCoarse fine ticks (~0.33 ms). Static bands are smoothed/redesigned on coarse ticks only; bands
-// with active dynamics are redesigned on every fine tick (measured: a coarser grid adds audible-range
-// zipper products, see Tests/DynamicEQTests.cpp GainModulationIsSmooth).
+// with active dynamics are redesigned on every fine tick. Measured (Tests/DynamicEQTests.cpp,
+// GainModulationIsSmooth): this grid matches the zipper level of per-sample redesign at ~1/8 of its cost.
 //
 // All fades and ramps are integer-indexed, so the output is bit-identical for any host block size.
 // Real-time safety: no allocation, locking or I/O. All buffers are supplied by the engine.
@@ -65,7 +65,7 @@ public:
     static constexpr double kFadeTimeSec = 0.010;
     static constexpr double kCrossfadeTimeSec = 0.015;
     static constexpr double kMaxCombinedGainDb = 30.0;
-    static constexpr int kFinePerCoarse = 4;
+    static constexpr int kFinePerCoarse = 2;
 
     void prepare (double sampleRate, int finePeriod) noexcept;
     void reset() noexcept;
@@ -103,8 +103,9 @@ private:
     void coarseTick() noexcept;
     void updateResponse (bool fineTickOnly, bool forceImmediate) noexcept;
     void configureSlot (Slot& slot) noexcept;
-    DesignSpec currentSpec (double extraGainDb) const noexcept;
+    DesignSpec currentSpec (double extraGainDb) noexcept;
     void snapSmoothing() noexcept;
+    void refreshTargetCache() noexcept;
     bool structureDiffers (const Slot& slot) const noexcept;
     void releaseBand() noexcept;
 
@@ -121,6 +122,9 @@ private:
     int fadeLength = 480, crossfadeLength = 720;
 
     double smLog2Freq = 0.0, smGainDb = 0.0, smLogQ = 0.0;
+    double cachedFreq = -1.0, cachedQ = -1.0, cachedGain = -1000.0;   // raw targets the cache was built from
+    double tgtLog2Freq = 0.0, tgtGainDb = 0.0, tgtLogQ = 0.0;         // targets in smoothing domains
+    double specLog2F = -1.0, specLogQ = -100.0, specFreq = 1.0, specQ = 1.0;
     double lastDesignedGain = 0.0, lastDesignedLog2F = -1.0, lastDesignedLogQ = -100.0;
     FilterType lastDesignedType = FilterType::NumTypes;
     int lastDesignedSlope = -1;
@@ -131,6 +135,7 @@ private:
     int crossfadePos = 0, crossfadeLen = 0; // > 0 while crossfading from the inactive slot to the active one
     int fadePos = 0;                         // 0..fadeLength (wet amount = fadeShape(fadePos / fadeLength))
     int fadeDir = 0;                         // +1 fading in, -1 fading out, 0 steady
+    bool settleOnFirstTick = true;           // after reset(): start fully active (no fade-in), e.g. renders
 
     bool dynamicsAllowed = true;
     DynamicDetector detector;

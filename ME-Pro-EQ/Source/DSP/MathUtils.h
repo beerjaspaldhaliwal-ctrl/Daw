@@ -41,4 +41,11 @@ inline double onePoleCoefficient (double timeSeconds, double updateRateHz) noexc
 
 inline bool isFiniteValue (double x) noexcept { return std::isfinite (x); }
 
+// Exact (bitwise) equality for change detection of cached values; avoids -Wfloat-equal noise while making the
+// intent explicit: any change, however small, counts.
+inline bool sameValue (double a, double b) noexcept
+{
+    return ! (a < b) && ! (b < a);
+}
+
 } // namespace mepro::dsp

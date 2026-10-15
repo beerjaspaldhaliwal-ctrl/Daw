@@ -1,0 +1,30 @@
+ME Pro EQ - installation
+========================
+
+Requirements
+- Windows 10 or Windows 11, 64-bit (x64)
+- A 64-bit VST3 host, e.g. FL Studio 20.8 or newer (64-bit)
+
+What the installer does
+- Installs the VST3 plugin bundle to the standard 64-bit VST3 folder:
+      C:\Program Files\Common Files\VST3\ME Pro EQ.vst3
+- Installs this documentation and the licence notices to:
+      C:\Program Files\ME Audio\ME Pro EQ
+- Your own presets are stored in Documents\ME Audio\ME Pro EQ. The uninstaller keeps them unless you
+  explicitly choose to delete them.
+
+Using ME Pro EQ in FL Studio
+1. Open FL Studio.
+2. Options > Manage plugins.
+3. Make sure "C:\Program Files\Common Files\VST3" is listed under Plugin search paths
+   (it is by default).
+4. Click "Find installed plugins" (Find plugins). ME Pro EQ appears under Effects, vendor "ME Audio".
+5. Tick the star (favourite) next to ME Pro EQ if you want it in the mixer's plugin menu.
+6. In the Mixer, select a track, click an empty effect slot and choose ME Pro EQ.
+
+Manual installation (without the installer)
+- Copy the folder "ME Pro EQ.vst3" into C:\Program Files\Common Files\VST3\ (administrator rights are
+  required for that folder) and rescan plugins in FL Studio as described above.
+
+Uninstalling
+- Windows Settings > Apps > ME Pro EQ > Uninstall, then rescan plugins in FL Studio.

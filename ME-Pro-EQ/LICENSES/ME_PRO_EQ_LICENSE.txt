@@ -1,0 +1,12 @@
+ME Pro EQ
+Copyright (c) ME Audio. All rights reserved.
+
+This software is provided by ME Audio. The end-user licence agreement for ME Pro EQ is defined by
+ME Audio; this file must be replaced by ME Audio's final EULA text before commercial release.
+
+Third-party components:
+- JUCE 9.0.4 (dual licensed AGPLv3 / commercial JUCE licence). See THIRD_PARTY_NOTICES.md.
+- Steinberg VST3 SDK 3.8.0 (MIT licence). "VST" is a registered trademark of Steinberg Media Technologies GmbH.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.

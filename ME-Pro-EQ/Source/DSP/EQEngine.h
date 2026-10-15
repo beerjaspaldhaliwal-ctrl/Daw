@@ -65,7 +65,7 @@ public:
     }
 
     // Research/test hook: force the fine control period (samples between dynamic redesigns; static bands
-    // use 4x this). 0 = automatic (4 samples at 44.1/48 kHz, scaled with the sample rate).
+    // use 2x this). 0 = automatic (8 samples at 44.1/48 kHz, scaled with the sample rate).
     void setControlPeriodOverride (int samples) noexcept { controlPeriodOverride = samples; }
 
     int getLatencySamples() const noexcept { return 0; }

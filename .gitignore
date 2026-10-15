@@ -11,3 +11,4 @@ ME-Pro-EQ/Build/*
 .DS_Store
 Thumbs.db
 __pycache__/
+ME-Pro-EQ/reports/

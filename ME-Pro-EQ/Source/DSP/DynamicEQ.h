@@ -70,11 +70,20 @@ inline CascadeCoeffs designDetectorFilter (FilterType bandType, double freqHz, d
     spec.freqHz = freqHz;
     spec.slopeIndex = 1; // 12 dB/oct
     spec.gainDb = 0.0;
-    switch (bandType)
+    if (bandType == FilterType::LowShelf)
     {
-        case FilterType::LowShelf:  spec.type = FilterType::LowPass;  spec.q = kButterworthQ; break;
-        case FilterType::HighShelf: spec.type = FilterType::HighPass; spec.q = kButterworthQ; break;
-        default:                    spec.type = FilterType::BandPass; spec.q = clampValue (q, 0.3, kMaxQ); break;
+        spec.type = FilterType::LowPass;
+        spec.q = kButterworthQ;
+    }
+    else if (bandType == FilterType::HighShelf)
+    {
+        spec.type = FilterType::HighPass;
+        spec.q = kButterworthQ;
+    }
+    else
+    {
+        spec.type = FilterType::BandPass;
+        spec.q = clampValue (q, 0.3, kMaxQ);
     }
     return designCascade (spec, sampleRate);
 }
@@ -103,7 +112,7 @@ public:
 
     void setFilter (FilterType bandType, double freqHz, double q) noexcept
     {
-        if (bandType == lastType && freqHz == lastFreq && q == lastQ)
+        if (bandType == lastType && sameValue (freqHz, lastFreq) && sameValue (q, lastQ))
             return;
         lastType = bandType;
         lastFreq = freqHz;
@@ -118,7 +127,7 @@ public:
     {
         attackMs = clampValue (attackMs, kMinAttackMs, kMaxAttackMs);
         releaseMs = clampValue (releaseMs, kMinReleaseMs, kMaxReleaseMs);
-        if (attackMs == attMs && releaseMs == relMs && newMode == mode)
+        if (sameValue (attackMs, attMs) && sameValue (releaseMs, relMs) && newMode == mode)
             return;
         if (newMode != mode)
             env = held = msAvg = 0.0;
@@ -134,8 +143,7 @@ public:
         for (int i = 0; i < n; ++i)
             scratch[i] = x[i * stride];
         filter.processMono (scratch, n, 1, 0);
-        for (int i = 0; i < n; ++i)
-            follow (mode == DetectorMode::Peak ? std::abs (scratch[i]) : scratch[i] * scratch[i]);
+        followBlock (scratch, n);
     }
 
     // Feed interleaved stereo, linked: peak = max(|L|,|R|), RMS = mean of L^2 and R^2. scratch: 2n doubles.
@@ -155,8 +163,7 @@ public:
     void processDerived (double* xInPlace, int n) noexcept
     {
         filter.processMono (xInPlace, n, 1, 0);
-        for (int i = 0; i < n; ++i)
-            follow (mode == DetectorMode::Peak ? std::abs (xInPlace[i]) : xInPlace[i] * xInPlace[i]);
+        followBlock (xInPlace, n);
     }
 
     double levelDb() const noexcept
@@ -167,6 +174,16 @@ public:
     double envelope() const noexcept { return env; }
 
 private:
+    void followBlock (const double* y, int n) noexcept
+    {
+        if (mode == DetectorMode::Peak)
+            for (int i = 0; i < n; ++i)
+                follow (std::abs (y[i]));
+        else
+            for (int i = 0; i < n; ++i)
+                follow (y[i] * y[i]);
+    }
+
     void updateTiming() noexcept
     {
         attCoef = onePoleCoefficient (attMs * 0.001, sampleRate);

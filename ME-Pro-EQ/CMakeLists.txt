@@ -32,6 +32,8 @@ add_library(meproeq_dsp STATIC
     Source/DSP/FilterDesign.cpp
     Source/DSP/FilterBand.cpp
     Source/DSP/EQEngine.cpp
+    Source/DSP/FFT.cpp
+    Source/DSP/SpectrumAnalyzer.cpp
 )
 target_include_directories(meproeq_dsp PUBLIC Source)
 target_compile_features(meproeq_dsp PUBLIC cxx_std_20)
@@ -47,6 +49,7 @@ if(MEPROEQ_BUILD_TESTS)
         Tests/EngineTests.cpp
         Tests/DynamicEQTests.cpp
         Tests/AutomationTests.cpp
+        Tests/AnalyzerTests.cpp
     )
     target_link_libraries(meproeq_dsp_tests PRIVATE meproeq_dsp)
     target_include_directories(meproeq_dsp_tests PRIVATE Tests)

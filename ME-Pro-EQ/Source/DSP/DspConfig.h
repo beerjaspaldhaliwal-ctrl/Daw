@@ -121,8 +121,9 @@ inline constexpr const char* filterTypeName (FilterType t) noexcept
         case FilterType::BandPass:  return "Band Pass";
         case FilterType::Tilt:      return "Tilt";
         case FilterType::AllPass:   return "All Pass";
-        default:                    return "?";
+        case FilterType::NumTypes:  break;
     }
+    return "?";
 }
 
 inline constexpr const char* stereoModeName (StereoMode m) noexcept
@@ -134,8 +135,9 @@ inline constexpr const char* stereoModeName (StereoMode m) noexcept
         case StereoMode::Right:  return "Right";
         case StereoMode::Mid:    return "Mid";
         case StereoMode::Side:   return "Side";
-        default:                 return "?";
+        case StereoMode::NumModes: break;
     }
+    return "?";
 }
 
 } // namespace mepro::dsp

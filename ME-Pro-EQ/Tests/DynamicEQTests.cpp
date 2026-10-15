@@ -192,8 +192,9 @@ ME_TEST ("Dynamic", AttackAndReleaseTiming)
             measure ("attack " + str (att) + " ms: measured 63% rise time (ms)", tAtt);
             measure ("release " + str (rel) + " ms (attack " + str (att) + "): measured 1/e fall time (ms), expected " + str (expRel), tRel);
             // Tolerance: detector band-pass group delay (~0.3 ms @ 1 kHz, Q=1), first-peak latency (0.25 ms),
-            // peak-hold ripple and measurement quantisation (one control period, 0.083 ms).
-            CHECK_MSG (std::abs (tAtt - att) < 0.05 * att + 0.7, "attack " << att << " measured " << tAtt);
+            // peak-hold ripple and measurement quantisation (the level is reported once per fine control
+            // period: 8 samples = 0.17 ms at 48 kHz).
+            CHECK_MSG (std::abs (tAtt - att) < 0.05 * att + 0.9, "attack " << att << " measured " << tAtt);
             CHECK_MSG (std::abs (tRel - expRel) < 0.05 * expRel + 1.0, "release " << rel << " measured " << tRel << " expected " << expRel);
         }
 }
