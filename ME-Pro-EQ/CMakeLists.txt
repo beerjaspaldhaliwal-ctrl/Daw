@@ -35,6 +35,7 @@ add_library(meproeq_dsp STATIC
     Source/DSP/FFT.cpp
     Source/DSP/SpectrumAnalyzer.cpp
     Source/DSP/LinearPhase.cpp
+    Source/DSP/ToneAnalysis.cpp
 )
 target_include_directories(meproeq_dsp PUBLIC Source)
 target_compile_features(meproeq_dsp PUBLIC cxx_std_20)
@@ -54,6 +55,7 @@ if(MEPROEQ_BUILD_TESTS)
         Tests/AutomationTests.cpp
         Tests/AnalyzerTests.cpp
         Tests/LinearPhaseTests.cpp
+        Tests/ToneAnalysisTests.cpp
     )
     target_link_libraries(meproeq_dsp_tests PRIVATE meproeq_dsp)
     target_include_directories(meproeq_dsp_tests PRIVATE Tests)

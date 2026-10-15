@@ -18,6 +18,9 @@
 
 #include "EditorModel.h"
 #include "SpectrumView.h"
+#include "SuggestionPanel.h"
+
+#include "DSP/ToneAnalysis.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -39,6 +42,12 @@ public:
     int getDbRange() const noexcept { return dbRange; }
 
     SpectrumView& getSpectrumView() noexcept { return spectrum; }
+
+    // Analysis suggestions: listen to the output, then show the suggestion panel (exposed for the tests).
+    void startAnalysis();
+    void finishAnalysis();
+    bool isAnalysing() const noexcept { return analysing; }
+    SuggestionPanel& getSuggestionPanel() noexcept { return suggestionPanel; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -95,6 +104,13 @@ private:
     std::array<bool, 4> domainUsed {};
     std::vector<float> signature;
     int lastAudition = -2;
+
+    // Analysis suggestions
+    dsp::ToneAnalysis analysis;
+    bool analysing = false;
+    juce::TextButton analyseButton { "ANALYSE" };
+    SuggestionPanel suggestionPanel;
+    static constexpr double kAutoStopSeconds = 30.0;
 
     // Linear-phase mode: response of the FIR actually running (read from the engine).
     bool linearPhase = false;

@@ -9,9 +9,12 @@ A 16-band equalizer for Windows 10/11 (64-bit VST3), aimed at FL Studio users. C
 - Pre/post spectrum analyser, interactive graph showing the exact running responses.
 - Presets (35 factory presets incl. Punjabi Production; user presets), A/B comparison, undo/redo,
   auto gain and level matching.
+- Linear-phase mode (FIR, 8k/16k/32k taps, latency reported to the host).
+- Analysis suggestions: measures the output and proposes bands with the measured reason; nothing is
+  applied without the user's click.
 
-Status: milestone M2 complete. Linear-phase mode and analysis suggestions are planned (M3). **Not yet
-tested inside FL Studio** — see [Documentation/ValidationReport.md](Documentation/ValidationReport.md).
+Status: milestone M3 complete. **Not yet tested inside FL Studio** — see
+[Documentation/ValidationReport.md](Documentation/ValidationReport.md).
 
 ## Documentation
 
@@ -72,7 +75,7 @@ embedded into the plugin at build time.
 
 | Path | Contents |
 |---|---|
-| `Source/DSP` | JUCE-free engine: filter design, SVF cascades, bands, dynamics, analyser, FFT |
+| `Source/DSP` | JUCE-free engine: filter design, SVF cascades, bands, dynamics, linear phase, analyser, FFT, analysis suggestions |
 | `Source/State` | Parameters, snapshots, undo history, A/B, presets |
 | `Source/UI` | Editor components (graph, band panel, header, meters, look and feel) |
 | `Source/PluginProcessor.*`, `Source/PluginEditor.*` | JUCE plugin wrapper |

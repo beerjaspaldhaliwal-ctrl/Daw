@@ -441,6 +441,78 @@ ME_TEST ("Plugin", LinearPhaseOfflineRenderIsDeterministic)
     CHECK (a == b);
 }
 
+ME_TEST ("Plugin", AnalysisSuggestionsNeedExplicitApproval)
+{
+    juceInit();
+    const double fs = 48000.0;
+    MEProEQAudioProcessor p;
+    p.prepareToPlay (fs, 480);
+    auto edBase = std::unique_ptr<juce::AudioProcessorEditor> (p.createEditor());
+    auto* ed = dynamic_cast<MEProEQAudioProcessorEditor*> (edBase.get());
+    CHECK (ed != nullptr);
+    if (ed == nullptr)
+        return;
+    ed->setSize (1220, 760);
+    auto& graph = ed->getGraph();
+
+    // Source material with a resonance at 1.8 kHz (+12 dB, Q 8), played through the (flat) EQ.
+    auto x = pinkNoise ((int) fs * 8, 0.3, 21);
+    {
+        mepro::dsp::SvfCascade c;
+        c.setLayout (mepro::dsp::sectionLayout (mepro::dsp::FilterType::Bell, 1));
+        c.setCoefficients (mepro::dsp::designCascade ({ mepro::dsp::FilterType::Bell, 1800.0, 12.0, 8.0, 1 }, fs));
+        c.processMono (x.data(), (int) x.size(), 1, 0);
+    }
+    const auto before = p.getSnapshotter().capture();
+    const auto undoBefore = p.getUndoHistory().undoSteps();
+
+    graph.startAnalysis();
+    CHECK (graph.isAnalysing());
+    for (int pos = 0; pos < (int) x.size(); pos += 2400)
+    {
+        std::vector<float> l (x.begin() + pos, x.begin() + std::min ((int) x.size(), pos + 2400)), r = l;
+        renderStereo (p, l, r, 480);
+        ed->refreshNow (0.05); // the editor drains the analyser stream
+    }
+    graph.finishAnalysis();
+    auto& panel = graph.getSuggestionPanel();
+    CHECK (panel.isVisible());
+    int res = -1;
+    for (int i = 0; i < panel.getNumItems(); ++i)
+        if (panel.getSuggestion (i).kind == mepro::dsp::Suggestion::Kind::Resonance)
+            res = i;
+    measure ("suggestions shown for pink noise with a 1.8 kHz resonance", (double) panel.getNumItems());
+    CHECK (res >= 0);
+
+    // Nothing has changed: analysis never touches the parameters.
+    CHECK (p.getSnapshotter().equal (before, p.getSnapshotter().capture()));
+    CHECK (p.getUndoHistory().undoSteps() == undoBefore);
+
+    // Screenshot of the panel for review.
+    {
+        const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+        auto file = juce::File::getCurrentWorkingDirectory().getChildFile ("reports/screenshots/editor_suggestions.png");
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+        juce::FileOutputStream os (file);
+        juce::PNGImageFormat().writeImageToStream (img, os);
+    }
+
+    if (res >= 0)
+    {
+        const auto sug = panel.getSuggestion (res);
+        CHECK (panel.apply (res));
+        CHECK (p.getUndoHistory().undoSteps() == undoBefore + 1); // one undoable action
+        CHECK (getParam (p, bp (0, BandParam::Used)) == 1.0f);
+        CHECK_NEAR (getParam (p, bp (0, BandParam::Freq)), (float) sug.band.freqHz, 0.5f);
+        CHECK_NEAR (getParam (p, bp (0, BandParam::Gain)), (float) sug.band.gainDb, 1e-4f);
+        CHECK_NEAR (getParam (p, bp (0, BandParam::Q)), (float) sug.band.q, 1e-3f);
+        CHECK (! panel.apply (res)); // applying twice does nothing
+        p.getUndoHistory().undo();
+        CHECK (getParam (p, bp (0, BandParam::Used)) == 0.0f);
+    }
+}
+
 ME_TEST ("Plugin", EditorUndoABPresetAndLevelMatch)
 {
     // Drives the editor's own controls: edits through the editor model are undoable (also via Ctrl+Z),

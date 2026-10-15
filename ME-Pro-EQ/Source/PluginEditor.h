@@ -33,6 +33,7 @@ public:
     mepro::ui::HeaderBar& getHeader() noexcept { return header; }
     mepro::ui::MeterStrip& getMeters() noexcept { return meters; }
     mepro::ui::EditorModel& getModel() noexcept { return model; }
+    mepro::ui::EQGraph& getGraph() noexcept { return graph; }
 
 private:
     void timerCallback() override;

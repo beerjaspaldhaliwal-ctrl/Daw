@@ -31,7 +31,7 @@ namespace
     }
 } // namespace
 
-EQGraph::EQGraph (EditorModel& m) : model (m)
+EQGraph::EQGraph (EditorModel& m) : model (m), suggestionPanel (m)
 {
     setWantsKeyboardFocus (true);
     setTitle ("EQ graph");
@@ -55,10 +55,47 @@ EQGraph::EQGraph (EditorModel& m) : model (m)
     spectrum.setFifos (&model.getProcessor().getPreFifo(), &model.getProcessor().getPostFifo());
     spectrum.loadFrom (ui);
     model.addListener (this);
+
+    analyseButton.setTooltip ("Analysis suggestions: listens to the output while you play typical material (3-30 s), then "
+                              "proposes EQ moves with the measured reason. Nothing is applied unless you press APPLY.");
+    analyseButton.onClick = [this] { analysing ? finishAnalysis() : startAnalysis(); };
+    addAndMakeVisible (analyseButton);
+    suggestionPanel.onClose = [this] { suggestionPanel.setVisible (false); };
+    addChildComponent (suggestionPanel);
+}
+
+void EQGraph::startAnalysis()
+{
+    analysis.prepare (sampleRate);
+    spectrum.setCapture (&analysis);
+    analysing = true;
+    suggestionPanel.setVisible (false);
+    analyseButton.setColour (juce::TextButton::buttonColourId, theme::accent.withAlpha (0.35f));
+}
+
+void EQGraph::finishAnalysis()
+{
+    spectrum.setCapture (nullptr);
+    analysing = false;
+    analyseButton.setButtonText ("ANALYSE");
+    analyseButton.removeColour (juce::TextButton::buttonColourId);
+    auto list = analysis.analyse();
+    juce::String status;
+    if (! analysis.hasEnoughMaterial())
+        status = "Not enough signal: play at least " + juce::String ((int) dsp::ToneAnalysis::kMinSeconds)
+               + " seconds of typical material while analysing (silence is ignored).";
+    else if (list.empty())
+        status = "No clear problem found in " + juce::String (analysis.getActiveSeconds(), 1)
+               + " s of material. Trust your ears - no suggestion is better than a wrong one.";
+    suggestionPanel.setSuggestions (std::move (list), status);
+    suggestionPanel.setVisible (true);
+    suggestionPanel.toFront (false);
+    resized();
 }
 
 EQGraph::~EQGraph()
 {
+    spectrum.setCapture (nullptr);
     model.removeListener (this);
     model.getProcessor().getPreFifo().setActive (false);
     model.getProcessor().getPostFifo().setActive (false);
@@ -117,6 +154,10 @@ void EQGraph::resized()
         b.setBounds (x, 12, 36, 20);
         x += 38;
     }
+    analyseButton.setBounds (getWidth() - 40 - 4 * 38 - 8 - 96, 12, 96, 20);
+    const auto p = plotArea();
+    const int pw = juce::jmin (440, (int) (p.getWidth() * 0.55f));
+    suggestionPanel.setBounds ((int) p.getRight() - pw - 8, (int) p.getY() + 30, pw, juce::jmax (160, (int) p.getHeight() - 40));
     signature.clear();
 }
 
@@ -214,6 +255,14 @@ void EQGraph::refresh()
     }
     recomputeDynamicCurves();
     updateLinearPhaseCurves();
+
+    if (analysing)
+    {
+        const double secs = analysis.getActiveSeconds();
+        analyseButton.setButtonText ("STOP  " + juce::String ((int) secs / 60) + ":" + juce::String ((int) secs % 60).paddedLeft ('0', 2));
+        if (secs >= kAutoStopSeconds)
+            finishAnalysis();
+    }
 
     const auto p = plotArea();
     spectrum.update (sampleRate, juce::jlimit (64, 1200, (int) (p.getWidth() / 2.0f)), fMin, fMax, 1.0 / 30.0);
@@ -520,7 +569,7 @@ void EQGraph::drawReadouts (juce::Graphics& g, juce::Rectangle<float> p)
             s << "   (off)";
         g.setFont (font (13.0f, true));
         g.setColour (bandColour (band));
-        g.drawText (s, juce::Rectangle<float> (p.getX() + 8.0f, p.getY() + 4.0f, p.getWidth() - 200.0f, 18.0f), juce::Justification::centredLeft);
+        g.drawText (s, juce::Rectangle<float> (p.getX() + 8.0f, p.getY() + 4.0f, p.getWidth() - 320.0f, 18.0f), juce::Justification::centredLeft, true);
     }
 
     if (mouseInside && dragBand < 0 && p.contains (mousePos))

@@ -52,6 +52,8 @@ public:
 
     // Creates a band in the first unused slot (returns its index, or -1 if all 16 are in use).
     int createBand (double freqHz, double gainDb, dsp::FilterType type);
+    // Creates a band with complete settings (type, frequency, gain, Q, slope, routing, dynamics). One action.
+    int createBandFrom (const dsp::BandSettings& settings);
     void deleteBand (int band);
     void resetBand (int band); // restore every setting except existence to its default
     void resetBandKeepFrequency (int band);

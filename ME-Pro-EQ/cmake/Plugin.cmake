@@ -37,6 +37,7 @@ set(MEPROEQ_PLUGIN_SOURCES
     Source/UI/BandControls.cpp
     Source/UI/Metering.cpp
     Source/UI/HeaderBar.cpp
+    Source/UI/SuggestionPanel.cpp
 )
 target_sources(MEProEQ PRIVATE ${MEPROEQ_PLUGIN_SOURCES})
 target_include_directories(MEProEQ PRIVATE Source)

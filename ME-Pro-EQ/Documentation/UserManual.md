@@ -9,7 +9,7 @@ zero-latency minimum-phase engine and an optional linear-phase mode.
 | Area | What it does |
 |---|---|
 | Header | **UNDO / REDO**, preset browser (**<** name **>** **SAVE**), **A / B** comparison with copy, **AUTO GAIN**, **MONO** (mono-compatibility listening, never rendered), **BYPASS** (host-automatable global bypass). |
-| Graph | Frequency response of every band and the combined response; real-time spectrum (input = dark line, output = filled). |
+| Graph | Frequency response of every band and the combined response; real-time spectrum (input = dark line, output = filled); **ANALYSE** for analysis suggestions; display range. |
 | Band strip | 16 band slots. Coloured = band exists (dim = switched off). Click an empty slot to create a band there. A dot marks bands with dynamics enabled. |
 | Band panel | All settings of the selected band, including the dynamic section. |
 | Meters | Clip indicator (click to reset), **phase mode** (Min phase / Linear) and linear-phase quality, input and output sample-peak meters (peak hold 1.5 s), **OUT − IN** level difference with **MATCH**, input and output trim (±24 dB), engine status (sample rate, channel layout, latency reported to the host). |
@@ -205,6 +205,26 @@ The preset name in the header opens the browser; **<** and **>** step through th
 - A `*` after the name means the settings were changed after loading. Loading a preset is one undoable
   step, so you can always get back to what you had.
 
+## Analysis suggestions
+
+**ANALYSE** (top right of the graph) listens to the plugin's output while you play typical material. After
+at least 3 seconds click **STOP** (it stops by itself after 30 s); silence is ignored. A panel then lists
+what it measured, for example:
+
+- *Low-frequency rumble* — energy well below the musical content; proposes a high-pass.
+- *Resonance* — a narrow peak standing out most of the time; proposes a narrow cut, sized from the
+  measurement.
+- *Low-mid build-up* / *Harshness* — a broad region louder than the rest of the spectrum's trend; proposes
+  a broad cut, or a dynamic band if the region is only loud at times.
+- *Sibilance / sharp bursts* — short 5–10 kHz bursts; proposes a dynamic band that only acts during them.
+- *Little air* — very little content above 9 kHz; proposes a gentle high shelf (low confidence).
+
+Each item shows the exact band it would create, a confidence (HIGH / MEDIUM / LOW) and the measured
+reason. **Nothing changes until you press APPLY**; each APPLY creates one band in a free slot as one
+undoable step, which you can then adjust by ear. DISMISS hides an item. The analysis compares the material
+with itself, not with a "correct" curve — it cannot know whether a peak is a resonance or a note the music
+needs. Because it measures the output, run it again after applying suggestions to see what remains.
+
 ## Precision and safety
 
 - All processing is 64-bit floating point internally (the host may run the plugin in 32- or 64-bit).
@@ -215,7 +235,6 @@ The preset name in the header opens the browser; **<** and **>** step through th
 
 ## Known limitations of this version
 
-- No intelligent analysis suggestions yet (planned).
 - ME Pro EQ has **not yet been tested inside FL Studio**. It passes pluginval (strictness 10) and the
   Steinberg VST3 validator, which exercise the same VST3 interface FL Studio uses, but those tools are not
   FL Studio. `Documentation/ValidationReport.md` lists exactly what was and was not tested.

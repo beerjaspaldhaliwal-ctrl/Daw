@@ -5,7 +5,7 @@ from the automated test suite (`meproeq_dsp_tests`, report: `reports/dsp_test_re
 folder). When a number here and the report disagree, the report is the truth and this document is out of
 date.
 
-Version described: 0.1.0 (milestone M3, linear-phase part). Two engine modes: minimum phase (zero latency,
+Version described: 0.1.0 (milestone M3). Two engine modes: minimum phase (zero latency,
 sections 2–6) and linear phase (FIR, section 8).
 
 ## 1. Signal flow
@@ -317,14 +317,48 @@ and bass. Use the minimum-phase mode or a higher quality for such settings; the 
 CPU and memory are listed in `ValidationReport.md` (about 1–1.6 % of one core per instance on the test VM for
 a typical curve; 6.5 MB / 12.9 MB allocated per instance at 48 kHz for Balanced / High resolution).
 
-## 9. Known limitations
+## 9. Analysis suggestions
+
+`Source/DSP/ToneAnalysis.*`. While the user lets it listen (3–30 s), the analysis measures the plugin's
+**output** (so suggestions add to the current curve), mono sum, ignoring frames below −70 dBFS:
+
+- a long-term average spectrum with ~2.9 Hz resolution at every sample rate (Hann, 75 % overlap), condensed
+  to 1/24-octave bands (low-frequency bins are distributed over the narrower bands they overlap);
+- per-frame 1/24-octave levels (~0.34 s frames) for persistence, and per-frame 1/6-octave levels from 1 to
+  16 kHz (~43 ms frames) for dynamic statistics.
+
+The rules compare the material with itself (no genre target curve). The reference "trend" is a robust
+straight-line fit of the 1/3-octave-smoothed spectrum against log-frequency between 100 Hz and 8 kHz,
+leaving out the region under test. Each suggestion is a complete band plus the measured evidence in words.
+
+| Finding | Rule | Proposal |
+|---|---|---|
+| Rumble | content starts at f_low (first 1/3-oct level within 15 dB of the strongest region, 40 Hz–2 kHz) ≥ 50 Hz, and below f_low/2 there is energy within 45 dB of that region | 18 dB/oct high-pass at 0.6·f_low |
+| Resonance | 1/24-oct level ≥ 6 dB above the median of its ±½-octave surroundings (outside ±1/6 octave), standing out in ≥ 60 % of the frames; up to three, ≥ 1/3 octave apart, 80 Hz–12 kHz | bell cut of 0.7 × excess at the measured width (Q from the half-excess points, 2–16) |
+| Low-mid build-up | 150–500 Hz median excess over the trend ≥ 2.5 dB (peak ≥ 3.5 dB) | bell −0.7 × excess (1.5–4 dB), Q 1 |
+| Harshness | 2–5 kHz, same thresholds | static bell (Q 1.2), or dynamic (RMS, threshold halfway between the 10th and 90th percentile) if the region's level swings by ≥ 6 dB |
+| Sibilance / bursts | 5–10 kHz short-term level ≥ 8 dB above its median in 2–30 % of the frames | dynamic bell (Q 3, RMS) at the centroid of what the bursts add, threshold halfway between the usual and the burst level, range −6 dB |
+| Air | 9–16 kHz ≥ 8 dB below the extrapolated trend while 2–8 kHz carries substantial content | +2 dB high shelf at 10 kHz, low confidence |
+
+Measured (`Suggestions.*` tests): pink noise at 44.1/48/96 kHz produces no suggestions; planted resonances
+are found at the exact frequency (2500 Hz → 2500 Hz, 180 Hz → 179 Hz, 6300 Hz → 6300 Hz) with Q within 25 %
+of the planted value; applying the suggested cut through the engine and analysing again leaves no resonance
+suggestion; a +5 dB low-mid hump at 300 Hz is found at 300 Hz; rumble under a 120 Hz-high-passed source gives a
+45 Hz high-pass (and none without rumble); 7 kHz bursts give a dynamic band at 7.26 kHz that reduces by 6 dB
+during the bursts and by less than 0.02 dB between them.
+
+These rules detect *measurable* deviations; they cannot know the musical intent. A persistent peak may be a
+note the arrangement needs, a "harsh" region may be the point of a sound. The editor therefore shows the
+evidence and never applies anything by itself.
+
+## 10. Known limitations
 
 - No oversampling; accuracy near Nyquist at 44.1/48 kHz is as measured in section 2.4.
 - Linear-phase mode: see section 8 (latency, low-frequency resolution, pre-ringing, no dynamic EQ,
   short dropout when switching the mode during playback).
 - Dynamic EQ is available on bell and shelf bands only (not on cut filters, notch, band pass, tilt or
   all pass).
-- Intelligent analysis suggestions are not implemented yet (M3).
+- Analysis suggestions are rule-based measurements (section 9), not a judgement of musical intent.
 
 ## References
 

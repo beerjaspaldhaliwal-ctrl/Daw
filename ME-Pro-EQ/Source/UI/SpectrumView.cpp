@@ -35,12 +35,12 @@ void SpectrumView::update (double sampleRate, int numPoints, double fMin, double
     if (preFifo != nullptr)
         preFifo->setActive (opts.enabled && opts.showPre);
     if (postFifo != nullptr)
-        postFifo->setActive (opts.enabled && opts.showPost);
-    if (! opts.enabled)
+        postFifo->setActive ((opts.enabled && opts.showPost) || capture != nullptr);
+    if (! opts.enabled && capture == nullptr)
         return;
 
-    if (needsConfigure || ! dsp::sameValue (sampleRate, cfgRate) || numPoints != cfgPoints || ! dsp::sameValue (fMin, cfgFMin)
-        || ! dsp::sameValue (fMax, cfgFMax))
+    if (opts.enabled && (needsConfigure || ! dsp::sameValue (sampleRate, cfgRate) || numPoints != cfgPoints || ! dsp::sameValue (fMin, cfgFMin)
+        || ! dsp::sameValue (fMax, cfgFMax)))
     {
         pre.configure (opts.analyzer, sampleRate, numPoints, fMin, fMax);
         post.configure (opts.analyzer, sampleRate, numPoints, fMin, fMax);
@@ -64,6 +64,8 @@ void SpectrumView::update (double sampleRate, int numPoints, double fMin, double
                 break;
             if (active)
                 a.feed (pullBuffer.data(), n);
+            if (capture != nullptr && f == postFifo)
+                capture->feed (pullBuffer.data(), n, 2);
         }
     };
     drain (preFifo, pre);
