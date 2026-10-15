@@ -103,6 +103,52 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
           Get-ChildItem build/installer | Format-Table Name, Length
 
+      - name: Installer - silent install and file check
+        run: |
+          $setup = Get-ChildItem build/installer -Filter "ME Pro EQ Setup.exe" | Select-Object -First 1
+          $log = Join-Path (Resolve-Path build/reports) "installer_install.log"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
+          $bundle = "C:\Program Files\Common Files\VST3\ME Pro EQ.vst3"
+          $binary = "$bundle\Contents\x86_64-win\ME Pro EQ.vst3"
+          foreach ($f in @($binary, "$bundle\Contents\Resources\moduleinfo.json")) { if (-not (Test-Path $f)) { throw "missing after install: $f" } }
+          $docs = "C:\Program Files\ME Audio\ME Pro EQ"
+          foreach ($f in "UserManual.md", "Installation.txt", "DSP_Design.md", "ValidationReport.md", "THIRD_PARTY_NOTICES.md", "ME_PRO_EQ_LICENSE.txt", "VST3_SDK_MIT.txt") {
+            if (-not (Test-Path "$docs\$f")) { throw "missing after install: $docs\$f" }
+          }
+          $installed = (Get-FileHash $binary).Hash
+          $built = (Get-FileHash "build/MEProEQ_artefacts/Release/VST3/ME Pro EQ.vst3/Contents/x86_64-win/ME Pro EQ.vst3").Hash
+          if ($installed -ne $built) { throw "installed binary differs from the validated build" }
+          Get-ChildItem -Recurse $bundle, $docs | Format-Table FullName, Length -AutoSize
+          "install: OK (binary SHA-256 $installed)" | Tee-Object -FilePath build/reports/installer_check.txt
+
+      - name: pluginval on the installed plugin (strictness 10)
+        shell: bash
+        run: |
+          log=build/reports/pluginval/pluginval_installed_strict10.log
+          set +e
+          ./pluginval/pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 1200000 \
+            --validate "C:/Program Files/Common Files/VST3/ME Pro EQ.vst3" > "$log" 2>&1
+          code=$?
+          set -e
+          tail -3 "$log"
+          if [ "$code" -ne 0 ]; then exit "$code"; fi
+          grep -q "SUCCESS" "$log"
+
+      - name: Installer - silent uninstall and removal check
+        run: |
+          $docs = "C:\Program Files\ME Audio\ME Pro EQ"
+          $bundle = "C:\Program Files\Common Files\VST3\ME Pro EQ.vst3"
+          $unins = Get-ChildItem $docs -Filter "unins*.exe" | Select-Object -First 1
+          if (-not $unins) { throw "uninstaller not found" }
+          $p = Start-Process -FilePath $unins.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstaller exit code $($p.ExitCode)" }
+          # The Inno Setup uninstaller continues from a temporary copy: wait until the files are gone.
+          for ($i = 0; $i -lt 60 -and ((Test-Path $bundle) -or (Test-Path "$docs\UserManual.md")); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $bundle) { throw "plugin bundle still present after uninstall" }
+          if (Test-Path "$docs\UserManual.md") { throw "documentation still present after uninstall" }
+          "uninstall: OK" | Tee-Object -FilePath build/reports/installer_check.txt -Append
+
       - name: Upload VST3 + installer
         uses: actions/upload-artifact@v4
         with:

@@ -125,7 +125,7 @@ private:
     struct Kernel
     {
         int form = kScalar;
-        std::vector<float> re, im;    // [path][partition][bin], 4 paths x K x (P + 1)
+        std::vector<float> re, im;    // [path][partition][bin], paths x K x (P + 1); grows on demand (designer)
         std::atomic<int> state { 0 }; // 0 free, 1 writing, 2 ready (pending), 3 active
     };
 
@@ -166,8 +166,8 @@ private:
     std::vector<double> m00, m01, m10, m11; // per-bin 2x2 magnitude matrix (or scalar / diagonal)
     std::vector<double> bandMag;            // per-bin magnitude of one band
     std::vector<std::complex<double>> spec; // N + 1 bins
-    std::vector<double> timeBuf;            // Nd samples
-    std::vector<double> firScratch;         // 4 paths x N taps of the latest design
+    std::vector<double> timeBuf;            // Nd samples (also the scratch for the realised response)
+    std::vector<double> firScratch;         // paths x N taps of the latest design (grows to 4 paths on demand)
     std::vector<double> window;             // N taps (periodic Hann)
     std::vector<double> blockIn;            // 2P
     std::vector<std::complex<double>> blockSpec;
@@ -206,7 +206,6 @@ private:
     // Published realised response (written by the designer, read by the UI)
     mutable std::mutex responseMutex;
     RealisedResponse published;
-    std::vector<double> respScratch;
 };
 
 } // namespace mepro::dsp

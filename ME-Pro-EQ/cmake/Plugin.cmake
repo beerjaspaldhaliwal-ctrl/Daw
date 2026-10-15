@@ -82,6 +82,7 @@ if(MEPROEQ_BUILD_TESTS)
         Tests/PluginTests.cpp
         Tests/StateTests.cpp
         Tests/StateServiceTests.cpp
+        Tests/RegressionTests.cpp
     )
     target_include_directories(meproeq_plugin_tests PRIVATE Tests Source
         $<TARGET_PROPERTY:MEProEQ,INCLUDE_DIRECTORIES>)
@@ -89,7 +90,8 @@ if(MEPROEQ_BUILD_TESTS)
     # already-compiled shared-code library and only inherits its include paths and definitions.
     target_compile_definitions(meproeq_plugin_tests PRIVATE $<TARGET_PROPERTY:MEProEQ,COMPILE_DEFINITIONS>)
     target_link_libraries(meproeq_plugin_tests PRIVATE MEProEQ meproeq_dsp)
-    target_compile_definitions(meproeq_plugin_tests PRIVATE MEPROEQ_PLUGIN_TESTS=1)
+    target_compile_definitions(meproeq_plugin_tests PRIVATE MEPROEQ_PLUGIN_TESTS=1
+                                                         MEPROEQ_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME plugin_tests COMMAND meproeq_plugin_tests --report ${CMAKE_BINARY_DIR}/reports/plugin_test_report.md)
 endif()
 

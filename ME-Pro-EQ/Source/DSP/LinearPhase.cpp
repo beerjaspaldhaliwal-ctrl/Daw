@@ -9,8 +9,39 @@
 #include <cstring>
 #include <limits>
 
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
+ #include <emmintrin.h>
+ #define MEPRO_LP_SSE2 1
+#endif
+
 namespace mepro::dsp
 {
+
+namespace
+{
+    // acc += H * X for n complex bins (split re/im). H in float (kernel spectra), X and acc in double.
+    // Same operation order per element in the SIMD and the scalar path.
+    inline void complexMac (double* ar, double* ai, const float* hr, const float* hi, const double* xr, const double* xi, int n) noexcept
+    {
+        int i = 0;
+#if MEPRO_LP_SSE2
+        for (; i + 2 <= n; i += 2)
+        {
+            const __m128d a = _mm_cvtps_pd (_mm_castsi128_ps (_mm_loadl_epi64 (reinterpret_cast<const __m128i*> (hr + i))));
+            const __m128d b = _mm_cvtps_pd (_mm_castsi128_ps (_mm_loadl_epi64 (reinterpret_cast<const __m128i*> (hi + i))));
+            const __m128d x = _mm_loadu_pd (xr + i), y = _mm_loadu_pd (xi + i);
+            _mm_storeu_pd (ar + i, _mm_add_pd (_mm_loadu_pd (ar + i), _mm_sub_pd (_mm_mul_pd (a, x), _mm_mul_pd (b, y))));
+            _mm_storeu_pd (ai + i, _mm_add_pd (_mm_loadu_pd (ai + i), _mm_add_pd (_mm_mul_pd (a, y), _mm_mul_pd (b, x))));
+        }
+#endif
+        for (; i < n; ++i)
+        {
+            const double a = hr[i], b = hi[i];
+            ar[i] += a * xr[i] - b * xi[i];
+            ai[i] += a * xi[i] + b * xr[i];
+        }
+    }
+} // namespace
 
 LinearPhaseGeometry linearPhaseGeometry (double sampleRate, int quality) noexcept
 {
@@ -54,12 +85,13 @@ LinearPhaseEngine::LinearPhaseEngine (double sampleRate, int q, bool startWorker
     tanHalf.resize ((size_t) nb);
     for (int k = 0; k < nb; ++k)
         tanHalf[(size_t) k] = k == N ? std::numeric_limits<double>::infinity() : std::tan (kPi * k / Nd);
-    for (auto* v : { &m00, &m01, &m10, &m11, &bandMag })
-        v->assign ((size_t) nb, 0.0);
+    // Only what the single-filter case needs is allocated up front; the extra paths for Left/Right and
+    // Mid/Side routing are allocated by the designer when first needed (never on the real-time audio path).
+    m00.assign ((size_t) nb, 0.0);
+    bandMag.assign ((size_t) nb, 0.0);
     spec.assign ((size_t) nb, {});
     timeBuf.assign ((size_t) Nd, 0.0);
-    respScratch.assign ((size_t) Nd, 0.0);
-    firScratch.assign ((size_t) (4 * N), 0.0);
+    firScratch.assign ((size_t) N, 0.0);
     window.resize ((size_t) N);
     for (int n = 0; n < N; ++n)
         window[(size_t) n] = 0.5 - 0.5 * std::cos (kTwoPi * n / N); // periodic Hann: w[0] = 0, symmetric about N/2
@@ -68,8 +100,8 @@ LinearPhaseEngine::LinearPhaseEngine (double sampleRate, int q, bool startWorker
 
     for (auto& k : kernels)
     {
-        k.re.assign ((size_t) (4 * K * bins), 0.0f);
-        k.im.assign ((size_t) (4 * K * bins), 0.0f);
+        k.re.assign ((size_t) (K * bins), 0.0f);
+        k.im.assign ((size_t) (K * bins), 0.0f);
     }
 
     fdlRe.assign ((size_t) (kMaxChannels * K * bins), 0.0);
@@ -85,7 +117,6 @@ LinearPhaseEngine::LinearPhaseEngine (double sampleRate, int q, bool startWorker
     dryDelay.assign ((size_t) (kMaxChannels * geo.latency), 0.0);
 
     published.domainA.reserve ((size_t) nb);
-    published.domainB.reserve ((size_t) nb);
     published.binHz = fs / Nd;
 
     if (startWorker)
@@ -211,10 +242,22 @@ void LinearPhaseEngine::designInto (Kernel& kernel, const Request& r, Publish pu
     }
     const int form = (mono || (! lr && ! ms)) ? kScalar : (lr && ! ms ? kDiagonal : kFull);
 
-    std::fill (m00.begin(), m00.end(), 1.0);
-    std::fill (m11.begin(), m11.end(), 1.0);
-    std::fill (m01.begin(), m01.end(), 0.0);
-    std::fill (m10.begin(), m10.end(), 0.0);
+    const int numPaths = form == kScalar ? 1 : (form == kDiagonal ? 2 : 4);
+    m00.assign ((size_t) nb, 1.0);
+    if (form != kScalar)
+        m11.assign ((size_t) nb, 1.0); // allocates on first use only (same size afterwards)
+    if (form == kFull)
+    {
+        m01.assign ((size_t) nb, 0.0);
+        m10.assign ((size_t) nb, 0.0);
+    }
+    if (firScratch.size() < (size_t) numPaths * (size_t) N)
+        firScratch.resize ((size_t) numPaths * (size_t) N);
+    if (kernel.re.size() < (size_t) numPaths * (size_t) K * (size_t) bins)
+    {
+        kernel.re.resize ((size_t) numPaths * (size_t) K * (size_t) bins);
+        kernel.im.resize ((size_t) numPaths * (size_t) K * (size_t) bins);
+    }
 
     // 2. Exact magnitude of every active band (the same digital designs the minimum-phase engine runs),
     //    combined per channel domain in band order.
@@ -316,13 +359,9 @@ void LinearPhaseEngine::designInto (Kernel& kernel, const Request& r, Publish pu
 
     // 3. Each path: zero-phase target -> inverse FFT -> centre at N/2 -> Hann window -> partition spectra.
     const std::vector<double>* paths[4] = { &m00, &m11, nullptr, nullptr };
-    int numPaths = 1;
-    if (form == kDiagonal)
-        numPaths = 2;
-    else if (form == kFull)
+    if (form == kFull)
     {
         paths[0] = &m00; paths[1] = &m01; paths[2] = &m10; paths[3] = &m11;
-        numPaths = 4;
     }
 
     for (int p = 0; p < numPaths; ++p)
@@ -366,10 +405,10 @@ void LinearPhaseEngine::designInto (Kernel& kernel, const Request& r, Publish pu
         const double* a = firScratch.data() + (size_t) pa * (size_t) N;
         const double* b = pb >= 0 ? firScratch.data() + (size_t) pb * (size_t) N : nullptr;
         for (int n = 0; n < N; ++n)
-            respScratch[(size_t) n] = a[n] + (b != nullptr ? sign * b[n] : 0.0);
-        std::fill (respScratch.begin() + N, respScratch.end(), 0.0);
-        designFft.forward (respScratch.data(), spec.data());
-        out.resize ((size_t) nb); // capacity reserved in the constructor: no allocation
+            timeBuf[(size_t) n] = a[n] + (b != nullptr ? sign * b[n] : 0.0);
+        std::fill (timeBuf.begin() + N, timeBuf.end(), 0.0);
+        designFft.forward (timeBuf.data(), spec.data());
+        out.resize ((size_t) nb); // domain A: capacity reserved in the constructor; domain B: allocated on first use
         for (int k = 0; k < nb; ++k)
             out[(size_t) k] = (float) (20.0 * std::log10 (std::max (std::abs (spec[(size_t) k]), 1e-15)));
     };
@@ -414,7 +453,7 @@ size_t LinearPhaseEngine::getAllocatedBytes() const noexcept
     size_t b = 0;
     auto add = [&b] (const auto& v) { b += v.capacity() * sizeof (v[0]); };
     for (const auto* v : { &tanHalf, &m00, &m01, &m10, &m11, &bandMag, &timeBuf, &firScratch, &window, &blockIn,
-                           &fdlRe, &fdlIm, &inBuf, &outBuf, &accRe, &accIm, &yOld, &ifftOut, &dryDelay, &respScratch })
+                           &fdlRe, &fdlIm, &inBuf, &outBuf, &accRe, &accIm, &yOld, &ifftOut, &dryDelay })
         add (*v);
     add (spec);
     add (blockSpec);
@@ -443,7 +482,7 @@ bool LinearPhaseEngine::getRealisedResponse (RealisedResponse& out) const
 bool LinearPhaseEngine::copyLastDesignedFir (int path, std::vector<double>& taps)
 {
     const std::lock_guard<std::mutex> lock (designMutex);
-    if (designCount.load() == 0 || path < 0 || path > 3)
+    if (designCount.load() == 0 || path < 0 || (size_t) (path + 1) * (size_t) N > firScratch.size())
         return false;
     taps.assign (firScratch.begin() + (std::ptrdiff_t) path * N, firScratch.begin() + (std::ptrdiff_t) (path + 1) * N);
     return true;
@@ -575,18 +614,8 @@ void LinearPhaseEngine::convolveBlock() noexcept
                         continue;
                     const size_t hb = ((size_t) pathIdx[oc][t] * (size_t) K + (size_t) kp) * (size_t) bins;
                     const size_t xb = ((size_t) inCh[oc][t] * (size_t) K + (size_t) slot) * (size_t) bins;
-                    const float* hr = kern.re.data() + hb;
-                    const float* hi = kern.im.data() + hb;
-                    const double* xr = fdlRe.data() + xb;
-                    const double* xi = fdlIm.data() + xb;
-                    double* ar = accRe.data() + (size_t) oc * (size_t) bins;
-                    double* ai = accIm.data() + (size_t) oc * (size_t) bins;
-                    for (int i = 0; i < bins; ++i)
-                    {
-                        const double a = hr[i], b = hi[i];
-                        ar[i] += a * xr[i] - b * xi[i];
-                        ai[i] += a * xi[i] + b * xr[i];
-                    }
+                    complexMac (accRe.data() + (size_t) oc * (size_t) bins, accIm.data() + (size_t) oc * (size_t) bins,
+                                kern.re.data() + hb, kern.im.data() + hb, fdlRe.data() + xb, fdlIm.data() + xb, bins);
                 }
         }
         for (int oc = 0; oc < nch; ++oc)

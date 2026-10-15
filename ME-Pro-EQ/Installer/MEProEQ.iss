@@ -72,8 +72,9 @@ begin
     PresetDir := ExpandConstant('{userdocs}\ME Audio\ME Pro EQ');
     if DirExists(PresetDir) then
     begin
-      if MsgBox('Also delete your ME Pro EQ user presets and settings?' + #13#10 + #13#10 + PresetDir + #13#10 + #13#10 +
-                'Choose "No" to keep them (recommended).', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      // SuppressibleMsgBox: a silent uninstall (/SUPPRESSMSGBOXES) answers "No" and keeps the presets.
+      if SuppressibleMsgBox('Also delete your ME Pro EQ user presets and settings?' + #13#10 + #13#10 + PresetDir + #13#10 + #13#10 +
+                'Choose "No" to keep them (recommended).', mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
         DelTree(PresetDir, True, True, True);
     end;
   end;
