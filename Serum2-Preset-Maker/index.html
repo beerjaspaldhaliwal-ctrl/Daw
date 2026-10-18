@@ -1,0 +1,282 @@
+<title>Serum 2 Preset Maker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: one centered work column; prompt panel on top, the patch it made laid out like a synth's module rows below. */
+  :root {
+    --bg: #eef0f4;
+    --panel: #ffffff;
+    --panel-2: #f5f6f9;
+    --line: #d5d9e2;
+    --ink: #1b2130;
+    --muted: #5b6477;
+    --accent: #2f5bd3;
+    --accent-ink: #ffffff;
+    --signal: #c2410c;
+    --ok: #15803d;
+    --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+    --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151d; --panel: #1a1f2a; --panel-2: #212735; --line: #2e3647; --ink: #e6e9f0; --muted: #98a2b6;
+      --accent: #7fa0ff; --accent-ink: #0d1220; --signal: #fb923c; --ok: #4ade80; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151d; --panel: #1a1f2a; --panel-2: #212735; --line: #2e3647; --ink: #e6e9f0; --muted: #98a2b6;
+    --accent: #7fa0ff; --accent-ink: #0d1220; --signal: #fb923c; --ok: #4ade80; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 28px 48px;
+  }
+  main { max-width: 860px; margin: 0 auto; display: grid; gap: 20px; }
+  header { display: grid; gap: 6px; }
+  .eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { font: 600 clamp(28px, 5vw, 40px)/1.1 var(--display); margin: 0; text-wrap: balance; letter-spacing: .01em; }
+  header p { margin: 0; color: var(--muted); max-width: 62ch; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; }
+  label { font-weight: 600; font-size: 14px; }
+  textarea, input[type=text] {
+    width: 100%; font: 16px/1.5 var(--body); color: var(--ink); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  }
+  textarea { min-height: 92px; resize: vertical; }
+  textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font: 13px/1 var(--body); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 12px; cursor: pointer; text-align: left;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; }
+  .row > .field { flex: 1 1 220px; display: grid; gap: 6px; min-width: 0; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; color: var(--muted); font-size: 14px; }
+  .check input { margin-top: 4px; }
+  button.primary {
+    font: 600 15px/1 var(--body); color: var(--accent-ink); background: var(--accent); border: 0;
+    border-radius: 8px; padding: 12px 18px; cursor: pointer;
+  }
+  button.primary:hover { filter: brightness(1.08); }
+  .result-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; }
+  .result-head h2 { font: 600 22px/1.2 var(--display); margin: 0; overflow-wrap: anywhere; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .tag { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; color: var(--muted); }
+  .modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .mod { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+  .mod.off { opacity: .55; }
+  .mod h3 { font: 600 12px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 4px; color: var(--muted); display: flex; justify-content: space-between; }
+  .mod h3 .led { width: 8px; height: 8px; border-radius: 50%; background: var(--line); align-self: center; }
+  .mod:not(.off) h3 .led { background: var(--ok); }
+  .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .kv span:last-child { font: 13px var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; display: grid; gap: 2px; }
+  .status { font-size: 14px; color: var(--muted); min-height: 1.4em; }
+  .status.err { color: var(--signal); }
+  details { color: var(--muted); font-size: 14px; }
+  details summary { cursor: pointer; color: var(--ink); font-weight: 600; }
+  details ul { padding-left: 18px; display: grid; gap: 4px; }
+  code { font: 13px var(--mono); }
+  @media (prefers-reduced-motion: no-preference) { .mod { transition: opacity .2s; } }
+</style>
+
+<main>
+  <header>
+    <span class="eyebrow">Text → .SerumPreset</span>
+    <h1>Serum 2 Preset Maker</h1>
+    <p>Describe a sound in plain words. You get a Serum 2 preset you can drag into the plugin or drop into your Serum 2 presets folder.</p>
+  </header>
+
+  <form class="panel" id="form">
+    <div class="field" style="display:grid;gap:6px">
+      <label for="prompt">Describe the sound</label>
+      <textarea id="prompt" spellcheck="false">dark wide reese bass with distortion</textarea>
+    </div>
+    <div class="chips" aria-label="Examples">
+      <button type="button" class="chip">huge supersaw lead, bright, detuned</button>
+      <button type="button" class="chip">warm evolving pad with slow attack and long release</button>
+      <button type="button" class="chip">short bright pluck, punchy</button>
+      <button type="button" class="chip">808 sub bass called "Deep 808"</button>
+      <button type="button" class="chip">acid lead with resonance 70 and cutoff 600hz</button>
+      <button type="button" class="chip">square arp, attack 5ms, decay 300ms, sustain 20%</button>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="author">Author (optional)</label>
+        <input type="text" id="author" placeholder="Your name">
+      </div>
+      <button class="primary" type="submit" id="make">Make preset</button>
+    </div>
+    <label class="check"><input type="checkbox" id="exp"> Include reverb and delay when asked for (experimental: these settings are a best guess and haven't been tested in Serum 2 yet)</label>
+  </form>
+
+  <section class="panel" id="result" aria-live="polite">
+    <div class="result-head">
+      <div>
+        <h2 id="r-name">–</h2>
+        <div class="tags" id="r-tags"></div>
+      </div>
+      <button class="primary" type="button" id="dl">Download .SerumPreset</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="modules" id="modules"></div>
+    <div>
+      <strong style="font-size:14px">What the text was read as</strong>
+      <ul class="notes" id="notes"></ul>
+    </div>
+  </section>
+
+  <section class="panel">
+    <details>
+      <summary>Words it understands</summary>
+      <ul>
+        <li><b>Sound type:</b> bass, reese, 808 / sub bass, lead, supersaw / trance, pad, pluck, keys / piano, bell, stab / chord, arp</li>
+        <li><b>Tone:</b> dark, warm, mellow, bright, airy, resonant / acid, wide / huge / lush, detuned, thin, chorus</li>
+        <li><b>Grit:</b> dirty, saturated, distorted, aggressive, growl, clean, punchy / tight (compressor)</li>
+        <li><b>Layers:</b> sub, noise / breathy, single oscillator, no sub</li>
+        <li><b>Shape:</b> slow attack / swell, short / snappy, long / sustained, high, low, mono, poly</li>
+        <li><b>Exact values:</b> <code>attack 10ms</code>, <code>decay 300ms</code>, <code>sustain 50%</code>, <code>release 1.2s</code>, <code>cutoff 800hz</code>, <code>resonance 40</code>, <code>unison 7</code>, <code>octave -1</code></li>
+        <li><b>Name:</b> put it in quotes or write <code>called My Preset</code></li>
+      </ul>
+    </details>
+    <details>
+      <summary>What gets set, and what doesn't yet</summary>
+      <ul>
+        <li>Each preset starts from Serum 2's own Init patch, so any setting not listed above stays at its Init value.</li>
+        <li>Oscillators use the factory <code>Analog/Basic Shapes</code> wavetable. The waveform positions are approximate.</li>
+        <li>No modulation routings yet (no LFO or envelope on the cutoff). Add these in Serum after loading.</li>
+        <li>Envelope decay and sustain use parameter names that haven't been confirmed from a real preset yet. If they don't take effect, set them in Serum.</li>
+        <li>Inside claude.ai, the download comes as a <code>.zip</code> holding the preset. Open <code>index.html</code> from the repo on your computer to save the <code>.SerumPreset</code> file directly.</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<script src="engine.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const E = window.SerumPresetMaker;
+  let current = null;
+
+  function fmtTime(s) { return s < 1 ? Math.round(s * 1000) + ' ms' : (+s.toFixed(2)) + ' s'; }
+  function pct(v) { return Math.round(v * 100) + '%'; }
+  const WAVE = { sine: 'Sine', saw: 'Saw', triangle: 'Triangle', square: 'Square', pulse: 'Pulse' };
+
+  function mod(title, on, rows) {
+    const el = document.createElement('div');
+    el.className = 'mod' + (on ? '' : ' off');
+    const h = document.createElement('h3');
+    h.textContent = title;
+    const led = document.createElement('span'); led.className = 'led'; h.appendChild(led);
+    el.appendChild(h);
+    for (const [k, v] of rows) {
+      const r = document.createElement('div'); r.className = 'kv';
+      const a = document.createElement('span'); a.textContent = k;
+      const b = document.createElement('span'); b.textContent = v;
+      r.append(a, b); el.appendChild(r);
+    }
+    return el;
+  }
+  function oscRows(o) {
+    const r = [['Wave', WAVE[o.wave] || o.wave], ['Octave', (o.octave > 0 ? '+' : '') + (o.octave || 0)]];
+    r.push(['Unison', String(o.unison || 1)]);
+    if (o.unison > 1) r.push(['Detune', (o.detune || 0.25).toFixed(2)]);
+    if (o.level !== undefined) r.push(['Level', pct(o.level)]);
+    return r;
+  }
+
+  function render(res) {
+    const d = res.design;
+    $('r-name').textContent = d.name;
+    $('r-tags').replaceChildren(...d.tags.map((t) => { const s = document.createElement('span'); s.className = 'tag'; s.textContent = t; return s; }));
+    const m = $('modules');
+    m.replaceChildren(
+      mod('Osc A', true, oscRows(d.oscA)),
+      mod('Osc B', !!d.oscB, d.oscB ? oscRows(d.oscB) : [['Off', '']]),
+      mod('Sub', !!d.sub, d.sub ? [['Level', pct(d.sub.level)]] : [['Off', '']]),
+      mod('Noise', !!d.noise, d.noise ? [['Level', pct(d.noise.level)]] : [['Off', '']]),
+      mod('Filter 1', !!d.filter, d.filter ? [['Type', 'MG Low 12'], ['Cutoff', d.filter.cutoff + ' Hz'], ['Resonance', String(Math.round(d.filter.reso))]] : [['Off', '']]),
+      mod('Env 1 (amp)', true, [['Attack', fmtTime(d.ampEnv.attack)], ['Decay', fmtTime(d.ampEnv.decay)], ['Sustain', pct(d.ampEnv.sustain)], ['Release', fmtTime(d.ampEnv.release)]]),
+      mod('Voicing', true, [['Mode', d.mono ? 'Mono' : 'Poly'], ['Voices', d.mono ? '1' : String(d.polyCount || 16)]]),
+      mod('FX', Object.keys(d.fx).length > 0, fxRows(d.fx)),
+    );
+    $('notes').replaceChildren(...res.notes.map((n) => { const li = document.createElement('li'); li.textContent = n; return li; }));
+  }
+  function fxRows(fx) {
+    const r = [];
+    if (fx.hyper) r.push(['Hyper/Dimension', fx.hyper.wet + '%']);
+    if (fx.dist) r.push(['Distortion', 'drive ' + fx.dist.drive]);
+    if (fx.comp) r.push(['Compressor', 'multiband']);
+    if (fx.delay) r.push(['Delay*', fx.delay.wet + '%']);
+    if (fx.reverb) r.push(['Reverb*', fx.reverb.wet + '%']);
+    return r.length ? r : [['None', '']];
+  }
+
+  function make() {
+    const text = $('prompt').value.trim();
+    if (!text) { $('status').textContent = 'Type a description first, for example "warm pad with slow attack".'; $('status').className = 'status err'; return; }
+    current = E.makePreset(text, { experimentalFx: $('exp').checked, author: $('author').value.trim() || undefined });
+    render(current);
+    $('status').className = 'status';
+    $('status').textContent = current.fileName + ' · ' + (current.bytes.length / 1024).toFixed(1) + ' KB';
+  }
+
+  // Minimal stored (uncompressed) zip, used where the viewer only allows .zip saves.
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+  function zip(name, data) {
+    const nm = new TextEncoder().encode(name), crc = crc32(data), n = data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, n, true); lh.setUint32(22, n, true); lh.setUint16(26, nm.length, true);
+    const cd = new DataView(new ArrayBuffer(46));
+    cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true);
+    cd.setUint32(16, crc, true); cd.setUint32(20, n, true); cd.setUint32(24, n, true); cd.setUint16(28, nm.length, true);
+    const cdOff = 30 + nm.length + n, cdLen = 46 + nm.length;
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, 1, true); end.setUint16(10, 1, true);
+    end.setUint32(12, cdLen, true); end.setUint32(16, cdOff, true);
+    return new Blob([lh, nm, data, cd, nm, end]);
+  }
+
+  let downloadsCap;
+  const capReady = (window.claude && window.claude.use ? window.claude.use('downloads') : Promise.resolve(null))
+    .then((d) => { downloadsCap = d; if (d) $('dl').textContent = 'Download preset (.zip)'; })
+    .catch(() => { downloadsCap = null; });
+
+  async function download() {
+    if (!current) make();
+    if (!current) return;
+    await capReady;
+    if (downloadsCap) {
+      try {
+        await downloadsCap.save({ filename: current.fileName.replace(/\.SerumPreset$/, '') + '.zip', data: zip(current.fileName, current.bytes) });
+        $('status').textContent = 'Saved. Unzip it and drag the .SerumPreset file into Serum 2.';
+      } catch (e) {
+        $('status').className = 'status err';
+        $('status').textContent = e && e.code === 'declined' ? 'Download cancelled.' : 'This view can\'t save files. Open index.html from the repo on your computer instead.';
+      }
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([current.bytes], { type: 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = current.fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    $('status').textContent = 'Saved ' + current.fileName + '. Drag it into Serum 2.';
+  }
+
+  $('form').addEventListener('submit', (e) => { e.preventDefault(); make(); });
+  $('dl').addEventListener('click', download);
+  for (const c of document.querySelectorAll('.chip')) c.addEventListener('click', () => { $('prompt').value = c.textContent; make(); });
+  make();
+})();
+</script>
