@@ -2,9 +2,18 @@
 
 Type a description like `dark wide reese bass with distortion` and get a `.SerumPreset` file for Xfer Serum 2.
 
+## Install on Windows
+
+1. On GitHub, open **Actions → Serum 2 Preset Maker**, click the latest green run, and download **Serum-2-Preset-Maker-Setup** under *Artifacts*.
+2. Unzip it and run `Serum 2 Preset Maker Setup.exe`. It installs for your Windows user only, so no admin password is needed.
+   If Windows SmartScreen says "Windows protected your PC", click **More info → Run anyway** (the installer isn't code-signed).
+3. Open **Serum 2 Preset Maker** from the Start menu or the desktop shortcut. It opens in your default browser.
+
+To remove it: **Settings → Apps → Installed apps → Serum 2 Preset Maker → Uninstall**.
+
 ## Use it
 
-1. Open `index.html` in a browser (double-click it; no install, no internet needed).
+1. Open `index.html` in a browser (or use the installed shortcut; no internet needed).
 2. Describe the sound, press **Make preset**, then **Download .SerumPreset**.
 3. Drag the file onto Serum 2, or copy it into your Serum 2 presets folder
    (Windows: `Documents\Xfer\Serum 2 Presets\Presets\User`).
