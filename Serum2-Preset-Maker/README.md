@@ -2,14 +2,20 @@
 
 Type a description like `dark wide reese bass with distortion` and get a `.SerumPreset` file for Xfer Serum 2.
 
-## Install on Windows
+## Install on Windows (with FL Studio)
 
-1. On GitHub, open **Actions → Serum 2 Preset Maker**, click the latest green run, and download **Serum-2-Preset-Maker-Setup** under *Artifacts*.
-2. Unzip it and run `Serum 2 Preset Maker Setup.exe`. It installs for your Windows user only, so no admin password is needed.
+1. On GitHub, open **Actions → Serum 2 Preset Maker**, click the latest green run, and download **Serum-2-Preset-Maker-for-FL-Studio-Setup** under *Artifacts*.
+2. Unzip it and run `Serum 2 Preset Maker for FL Studio Setup.exe`. It installs for your Windows user only, so no admin password is needed.
    If Windows SmartScreen says "Windows protected your PC", click **More info → Run anyway** (the installer isn't code-signed).
-3. Open **Serum 2 Preset Maker** from the Start menu or the desktop shortcut. It opens in your default browser.
+3. The installer creates the folder your presets are saved to:
+   - `Documents\Xfer\Serum 2 Presets\Presets\User\Preset Maker` if Serum 2 is installed, so the presets also show in Serum 2's own browser
+   - `Documents\Serum 2 Preset Maker\Presets` otherwise
+4. Set up FL Studio once (the installer shows these steps and can open the folder for you):
+   - Drag the presets folder from File Explorer onto FL Studio's Browser.
+   - In the Browser's options menu, turn on **Show unknown file types**, so FL Studio lists `.SerumPreset` files.
+5. Open **Serum 2 Preset Maker** from the Start menu or desktop, make a preset and click **Save to presets folder** (Edge or Chrome; the first time, pick the folder from step 3). Then drag it from FL Studio's Browser onto Serum 2.
 
-To remove it: **Settings → Apps → Installed apps → Serum 2 Preset Maker → Uninstall**.
+The installer doesn't change FL Studio's settings itself. To remove it: **Settings → Apps → Installed apps → Serum 2 Preset Maker → Uninstall**. Your presets folder is kept.
 
 ## Use it
 

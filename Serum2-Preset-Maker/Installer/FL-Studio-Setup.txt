@@ -1,0 +1,38 @@
+Serum 2 Preset Maker + FL Studio: one-time setup
+=================================================
+
+Your presets are saved to this folder:
+
+  Documents\Xfer\Serum 2 Presets\Presets\User\Preset Maker
+  (or Documents\Serum 2 Preset Maker\Presets if Serum 2 wasn't found)
+
+The Start menu has a "Presets folder" shortcut that opens it.
+
+
+1. Add the folder to FL Studio's Browser (once)
+   - Open FL Studio.
+   - Drag the presets folder from File Explorer onto FL Studio's Browser
+     (the panel on the left). The last page of this installer can open
+     the folder for you.
+   - Or: Options > File settings > Browser extra search folders, click the
+     folder icon on an empty row and pick the presets folder.
+
+2. Let the Browser show Serum presets (once)
+   - FL Studio hides file types it doesn't know, including .SerumPreset.
+   - Open the Browser's options menu and turn on "Show unknown file types".
+
+3. Make a preset and play it
+   - Open Serum 2 Preset Maker from the Start menu or desktop.
+   - Type a description, click "Make preset", then "Save to presets folder".
+     The first time, pick the presets folder above. Edge and Chrome
+     remember it after that.
+   - In FL Studio, add Serum 2 to a channel and drag the preset from the
+     Browser onto Serum 2's window.
+   - Because the folder sits inside Serum 2's User presets, the presets
+     also show in Serum 2's own preset browser after you rescan presets
+     from Serum 2's menu.
+
+Firefox can't save into a folder. In Firefox, use "Download" and move the
+file into the presets folder yourself.
+
+Uninstalling the Preset Maker keeps the presets folder and your presets.
