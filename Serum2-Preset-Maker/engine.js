@@ -163,9 +163,126 @@
     return out;
   }
 
-  /* ---------------------------------------------------- design -> preset */
+  /* ------------------------------------------------------------ the design */
+
+  // A design is the editable description of a preset. Times are in seconds,
+  // levels and sustain 0..1, resonance/mix/drive 0..100, cutoff in Hz.
+  //   { name, description, category, tags, mono, polyCount,
+  //     oscA: {wave, octave, unison, detune, level, pan},
+  //     oscB: {on, wave, octave, unison, detune, level, pan},
+  //     sub: {on, level}, noise: {on, level, sample}, filter: {on, cutoff, reso},
+  //     ampEnv: {attack, hold, decay, sustain, release},
+  //     fx: {hyper: {on, wet}, dist: {on, drive, wet}, comp: {on},
+  //          delay: {on, wet}, reverb: {on, wet, size}} }   (delay and reverb are experimental)
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const num = (v, fallback) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+
+  const WAVES = ['sine', 'triangle', 'saw', 'square', 'pulse', 'narrowpulse'];
+  const OSC_LEVEL_DEFAULT = 0.75; // Init level; not written to the file unless changed
+
+  const MODULE_DEFAULTS = {
+    oscA: { wave: 'saw', octave: 0, unison: 1, detune: 0.25, level: OSC_LEVEL_DEFAULT, pan: 0 },
+    oscB: { on: false, wave: 'saw', octave: 0, unison: 1, detune: 0.25, level: OSC_LEVEL_DEFAULT, pan: 0 },
+    sub: { on: false, level: 0.5625, octave: -1 },
+    noise: { on: false, level: 0.2, sample: 'air' },
+    filter: { on: false, cutoff: 2000, reso: 10 },
+    ampEnv: { attack: 0.001, hold: 0, decay: 1.0, sustain: 1.0, release: 0.1 },
+    hyper: { on: false, wet: 40 },
+    dist: { on: false, drive: 50, wet: 60 },
+    comp: { on: false },
+    delay: { on: false, wet: 25 },
+    reverb: { on: false, wet: 30, size: 70 },
+  };
+
+  function normOsc(o, def) {
+    o = o || {};
+    return {
+      wave: WAVES.includes(o.wave) ? o.wave : def.wave,
+      octave: clamp(Math.round(num(o.octave, def.octave)), -4, 4),
+      unison: clamp(Math.round(num(o.unison, def.unison)), 1, 16),
+      detune: clamp(num(o.detune, def.detune), 0, 1),
+      level: clamp(num(o.level, def.level), 0, 1),
+      pan: clamp(num(o.pan, def.pan), -100, 100),
+    };
+  }
+
+  // Older designs mark a module as on by its presence; newer ones use `on`.
+  function isOn(m) { return !!m && m.on !== false; }
+
+  // Fills in and clamps every field, so the editor, the preview and the file
+  // writer can rely on the full shape whatever produced the design.
+  function normalizeDesign(raw) {
+    raw = raw || {};
+    const fx = raw.fx || {};
+    const env = raw.ampEnv || {};
+    const D = MODULE_DEFAULTS;
+    const category = BASES[raw.category] ? raw.category : 'lead';
+    const d = {
+      name: String(raw.name || 'Text Preset').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 60) || 'Text Preset',
+      description: String(raw.description || '').slice(0, 300),
+      category,
+      mono: !!raw.mono,
+      polyCount: clamp(Math.round(num(raw.polyCount, 16)), 1, 32),
+      oscA: normOsc(raw.oscA, D.oscA),
+      oscB: Object.assign({ on: isOn(raw.oscB) }, normOsc(raw.oscB, D.oscB)),
+      sub: {
+        on: isOn(raw.sub),
+        level: clamp(num(raw.sub && raw.sub.level, D.sub.level), 0, 1),
+        octave: clamp(Math.round(num(raw.sub && raw.sub.octave, D.sub.octave)), -3, 3),
+      },
+      noise: {
+        on: isOn(raw.noise),
+        level: clamp(num(raw.noise && raw.noise.level, D.noise.level), 0, 1),
+        sample: raw.noise && NOISE_SAMPLES[raw.noise.sample] ? raw.noise.sample : D.noise.sample,
+      },
+      filter: {
+        on: isOn(raw.filter),
+        cutoff: clamp(Math.round(num(raw.filter && raw.filter.cutoff, D.filter.cutoff)), 20, 20000),
+        reso: clamp(num(raw.filter && raw.filter.reso, D.filter.reso), 0, 100),
+      },
+      ampEnv: {
+        attack: clamp(num(env.attack, D.ampEnv.attack), 0, 32),
+        hold: clamp(num(env.hold, D.ampEnv.hold), 0, 32),
+        decay: clamp(num(env.decay, D.ampEnv.decay), 0.001, 32),
+        sustain: clamp(num(env.sustain, D.ampEnv.sustain), 0, 1),
+        release: clamp(num(env.release, D.ampEnv.release), 0.001, 32),
+      },
+      fx: {
+        hyper: { on: isOn(fx.hyper), wet: clamp(num(fx.hyper && fx.hyper.wet, D.hyper.wet), 0, 100) },
+        dist: {
+          on: isOn(fx.dist),
+          drive: clamp(num(fx.dist && fx.dist.drive, D.dist.drive), 0, 100),
+          wet: clamp(num(fx.dist && fx.dist.wet, D.dist.wet), 0, 100),
+        },
+        comp: { on: fx.comp === true || (typeof fx.comp === 'object' && isOn(fx.comp)) },
+        delay: { on: isOn(fx.delay), wet: clamp(num(fx.delay && fx.delay.wet, D.delay.wet), 0, 100) },
+        reverb: {
+          on: isOn(fx.reverb),
+          wet: clamp(num(fx.reverb && fx.reverb.wet, D.reverb.wet), 0, 100),
+          size: clamp(num(fx.reverb && fx.reverb.size, D.reverb.size), 0, 100),
+        },
+      },
+    };
+    if (raw.author) d.author = String(raw.author).slice(0, 60);
+    d.tags = [BASES[category].tag, 'Wavetable', d.mono ? 'Mono' : 'Poly'];
+    tidy(d);
+    return d;
+  }
+
+  // Rounds to the precision a person would set by hand.
+  function tidy(d) {
+    const r = (v, places) => Math.round(v * Math.pow(10, places)) / Math.pow(10, places);
+    for (const o of [d.oscA, d.oscB]) { o.detune = r(o.detune, 3); o.level = r(o.level, 3); o.pan = r(o.pan, 1); }
+    d.sub.level = r(d.sub.level, 3);
+    d.noise.level = r(d.noise.level, 3);
+    d.filter.reso = r(d.filter.reso, 1);
+    for (const k of ['attack', 'hold', 'decay', 'release']) d.ampEnv[k] = r(d.ampEnv[k], 4);
+    d.ampEnv.sustain = r(d.ampEnv.sustain, 3);
+    for (const m of Object.values(d.fx)) for (const k of ['wet', 'drive', 'size']) if (k in m) m[k] = r(m[k], 1);
+  }
+
+  /* ---------------------------------------------------- design -> preset */
 
   // Filter cutoff is stored 0..1 on a log scale. 0.5 = 425 Hz (Serum's default).
   const F_MIN = 8.19, F_MAX = 22050;
@@ -179,13 +296,10 @@
   function oscParams(o, enable) {
     const p = {};
     if (enable) p.kParamEnable = 1.0;
-    if (o.octave) p.kParamOctave = clamp(Math.round(o.octave), -4, 4);
-    if (o.pan) p.kParamPan = clamp(o.pan, -100, 100);
-    if (o.unison && o.unison > 1) {
-      p.kParamUnison = clamp(Math.round(o.unison), 1, 16);
-      p.kParamDetune = clamp(o.detune !== undefined ? o.detune : 0.25, 0, 1);
-    }
-    if (o.level !== undefined) p.kParamVolume = clamp(o.level, 0, 1);
+    if (o.octave) p.kParamOctave = o.octave;
+    if (o.pan) p.kParamPan = o.pan;
+    if (o.unison > 1) { p.kParamUnison = o.unison; p.kParamDetune = o.detune; }
+    if (o.level !== OSC_LEVEL_DEFAULT) p.kParamVolume = o.level;
     return Object.keys(p).length ? p : 'default';
   }
 
@@ -195,72 +309,68 @@
     wt.relativePathToWT = BASIC_SHAPES.path;
     wt.numFrames = BASIC_SHAPES.numFrames;
     wt.flex = JSON.parse(JSON.stringify(FLAT_CURVE));
-    const p = { kParamTablePos: o.tablePos !== undefined ? o.tablePos : wavePos(o.wave) };
-    if (o.warp) { p.kParamWarp = clamp(o.warp, 0, 1); p.kParamWarpMenu = o.warpMode || 'kSync'; }
-    wt.plainParams = p;
+    wt.plainParams = { kParamTablePos: wavePos(o.wave) };
     osc.plainParams = oscParams(o, idx !== 0);
   }
 
   function buildState(design) {
+    const d = normalizeDesign(design);
     const s = JSON.parse(JSON.stringify(INIT));
-    const name = design.name || 'Text Preset';
-    s.presetName = name;
-    s.presetAuthor = design.author || 'Serum 2 Preset Maker';
-    s.presetDescription = design.description || '';
-    s.tags = design.tags || [];
+    s.presetName = d.name;
+    s.presetAuthor = d.author || 'Serum 2 Preset Maker';
+    s.presetDescription = d.description;
+    s.tags = d.tags;
 
-    setWavetableOsc(s, 0, design.oscA);
-    if (design.oscB) setWavetableOsc(s, 1, design.oscB);
+    setWavetableOsc(s, 0, d.oscA);
+    if (d.oscB.on) setWavetableOsc(s, 1, d.oscB);
 
-    if (design.sub) s.Oscillator4.plainParams = { kParamEnable: 1.0, kParamVolume: clamp(design.sub.level, 0, 1) };
-    if (design.noise) {
-      const n = s.Oscillator3.NoiseOsc3, smp = NOISE_SAMPLES[design.noise.sample] || NOISE_SAMPLES.air;
+    if (d.sub.on) {
+      // Serum's sub defaults to the played note's octave; -1 puts it under the oscillators.
+      s.Oscillator4.plainParams = { kParamEnable: 1.0, kParamVolume: d.sub.level };
+      if (d.sub.octave) s.Oscillator4.plainParams.kParamOctave = d.sub.octave;
+    }
+    if (d.noise.on) {
+      const n = s.Oscillator3.NoiseOsc3, smp = NOISE_SAMPLES[d.noise.sample];
       n.relativePathToNoiseSample = smp.path;
       n.numFrames = smp.numFrames;
-      s.Oscillator3.plainParams = { kParamEnable: 1.0, kParamVolume: clamp(design.noise.level, 0, 1) };
+      s.Oscillator3.plainParams = { kParamEnable: 1.0, kParamVolume: d.noise.level };
     }
 
-    if (design.filter) {
-      const f = design.filter;
-      s.VoiceFilter0.plainParams = {
-        kParamEnable: 1.0,
-        kParamFreq: hzToNorm(f.cutoff),
-        kParamReso: clamp(f.reso, 0, 100),
-      };
+    if (d.filter.on) {
+      s.VoiceFilter0.plainParams = { kParamEnable: 1.0, kParamFreq: hzToNorm(d.filter.cutoff), kParamReso: d.filter.reso };
       // Send A, B, C and noise through the filter; the sub stays direct.
       for (let i = 0; i < 4; i++) s['RoutingSlot' + i].plainParams = { kParamRoutingDest: 'kRoutingDestFilter' };
-      if (design.sub) s.RoutingSlot4.plainParams = { kParamRoutingDest: 'kRoutingDestDirect' };
+      if (d.sub.on) s.RoutingSlot4.plainParams = { kParamRoutingDest: 'kRoutingDestDirect' };
     }
 
-    const e = design.ampEnv;
+    const e = d.ampEnv;
     s.Env0.plainParams = Object.assign({}, s.Env0.plainParams, {
-      kParamAttack: e.attack, kParamHold: e.hold || 0, kParamDecay: e.decay,
+      kParamAttack: e.attack, kParamHold: e.hold, kParamDecay: e.decay,
       kParamSustain: e.sustain, kParamRelease: e.release,
     });
 
-    const g = {};
-    if (design.mono) { g.kParamMonoToggle = 1.0; g.kParamLimitSameNotePolyphony = 1.0; }
-    if (design.polyCount) g.kParamPolyCount = design.polyCount;
-    s.Global0.plainParams = Object.keys(g).length ? g : 'default';
+    s.Global0.plainParams = d.mono
+      ? { kParamMonoToggle: 1.0, kParamLimitSameNotePolyphony: 1.0 }
+      : { kParamPolyCount: d.polyCount };
 
-    const fx = [], f = design.fx || {};
-    if (f.hyper) fx.push({
-      FXHyperD: { lfo: HYPER_LFO, plainParams: { kParamDetune: 50.0, kParamDimESize: 50.0, kParamRate: 4.5, kParamUnison: 4.0, kParamWet: clamp(f.hyper.wet, 0, 100) } },
+    const fx = [], f = d.fx;
+    if (f.hyper.on) fx.push({
+      FXHyperD: { lfo: HYPER_LFO, plainParams: { kParamDetune: 50.0, kParamDimESize: 50.0, kParamRate: 4.5, kParamUnison: 4.0, kParamWet: f.hyper.wet } },
       kUIParamMixOrGainDimE: 0.0, kUIParamMixOrGainHyper: 0.0, type: 9,
     });
-    if (f.dist) fx.push({
-      FXDistortion: { plainParams: { kParamDrive: clamp(f.dist.drive, 0, 100), kParamFreq: 0.5, kParamMode: f.dist.mode || 'kDiode2', kParamWet: clamp(f.dist.wet, 0, 100) } },
+    if (f.dist.on) fx.push({
+      FXDistortion: { plainParams: { kParamDrive: f.dist.drive, kParamFreq: 0.5, kParamMode: 'kDiode2', kParamWet: f.dist.wet } },
       flex: [JSON.parse(JSON.stringify(FLAT_CURVE)), JSON.parse(JSON.stringify(FLAT_CURVE))],
       kUIParamMixOrGain: 0.0, type: 0,
     });
-    if (f.comp) fx.push({
+    if (f.comp.on) fx.push({
       FXComp: { plainParams: { kParamAttack: 90.0, kParamCompensatedWetDry: 0.0, kParamGain0: 4.6, kParamGain2: 4.6, kParamMakeup: 1.79, kParamRatioBelow: 0.75, kParamRelease: 90.0 } },
       kUIParamMixOrGain: 0.0, type: 5,
     });
     // Experimental: effect type numbers and parameter names below are guesses
     // that have not been seen in a real Serum 2 file.
-    if (f.delay) fx.push({ FXDelay: { plainParams: { kParamWet: clamp(f.delay.wet, 0, 100) } }, kUIParamMixOrGain: 0.0, type: 4 });
-    if (f.reverb) fx.push({ FXReverb: { plainParams: { kParamWet: clamp(f.reverb.wet, 0, 100), kParamSize: clamp(f.reverb.size, 0, 100) } }, kUIParamMixOrGain: 0.0, type: 6 });
+    if (f.delay.on) fx.push({ FXDelay: { plainParams: { kParamWet: f.delay.wet } }, kUIParamMixOrGain: 0.0, type: 4 });
+    if (f.reverb.on) fx.push({ FXReverb: { plainParams: { kParamWet: f.reverb.wet, kParamSize: f.reverb.size } }, kUIParamMixOrGain: 0.0, type: 6 });
     s.FXRack0.FX = fx;
 
     return s;
@@ -274,6 +384,70 @@
       url: 'https://xferrecords.com/', vendor: 'Xfer Records', version: 7,
     };
     return packPreset(meta, state);
+  }
+
+  function fileNameFor(name) { return String(name).replace(/[\\/:*?"<>|]/g, '').trim() + '.SerumPreset'; }
+
+  function presetFile(design) {
+    const d = normalizeDesign(design);
+    return { bytes: buildPreset(d), fileName: fileNameFor(d.name) };
+  }
+
+  /* ------------------------------------------------------------ variations */
+
+  // Small deterministic PRNG so a variation can be made again from its seed.
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const RELATED_WAVES = { sine: ['triangle'], triangle: ['sine', 'square'], saw: ['square', 'pulse'], square: ['saw', 'pulse'], pulse: ['square', 'narrowpulse'], narrowpulse: ['pulse'] };
+
+  // A new design near `design`. amount 0..1 sets how far it may move.
+  function varyDesign(design, opts) {
+    opts = opts || {};
+    const amount = clamp(num(opts.amount, 0.5), 0, 1);
+    const r = rng(num(opts.seed, Date.now()));
+    const pick = (list) => list[Math.floor(r() * list.length)];
+    const spread = (v, rel) => v * Math.pow(2, (r() * 2 - 1) * rel * amount); // multiplicative
+    const nudge = (v, by) => v + (r() * 2 - 1) * by * amount;                    // additive
+    const chance = (p) => r() < p * amount;
+    const d = normalizeDesign(JSON.parse(JSON.stringify(design)));
+
+    for (const o of [d.oscA, d.oscB]) {
+      if (chance(0.35)) o.wave = pick(RELATED_WAVES[o.wave]);
+      if (o.unison > 1) {
+        o.unison = clamp(Math.round(nudge(o.unison, 2)), 2, 16);
+        o.detune = clamp(spread(o.detune, 0.8), 0.02, 0.9);
+      }
+    }
+    if (d.oscB.on) {
+      if (chance(0.3)) d.oscB.octave = clamp(d.oscB.octave + pick([-1, 1]), -2, 2);
+      d.oscB.level = clamp(nudge(d.oscB.level, 0.15), 0.1, 1);
+    }
+    if (d.sub.on) d.sub.level = clamp(nudge(d.sub.level, 0.15), 0.1, 1);
+    if (chance(0.15)) d.noise.on = !d.noise.on;
+    if (d.filter.on) {
+      d.filter.cutoff = clamp(Math.round(spread(d.filter.cutoff, 1.2)), 60, 18000);
+      d.filter.reso = clamp(nudge(d.filter.reso, 20), 0, 85);
+    }
+    const e = d.ampEnv;
+    e.attack = clamp(e.attack < 0.01 ? e.attack : spread(e.attack, 1), 0.0005, 10);
+    e.decay = clamp(spread(e.decay, 1), 0.02, 10);
+    e.release = clamp(spread(e.release, 1), 0.01, 10);
+    if (e.sustain > 0 && e.sustain < 1) e.sustain = clamp(nudge(e.sustain, 0.2), 0, 1);
+    if (d.fx.hyper.on) d.fx.hyper.wet = clamp(nudge(d.fx.hyper.wet, 20), 5, 90);
+    if (chance(0.2)) d.fx.dist.on = !d.fx.dist.on;
+    if (d.fx.dist.on) d.fx.dist.drive = clamp(nudge(d.fx.dist.drive, 20), 10, 95);
+
+    if (opts.name) d.name = opts.name;
+    return normalizeDesign(d);
   }
 
   /* ---------------------------------------------------- text -> design */
@@ -429,19 +603,190 @@
     d.name = (q ? q[1] : text.replace(/[^\w\s-]/g, ' ').trim().split(/\s+/).filter((w) => !FILLER.test(w)).slice(0, 4).join(' ')).trim() || 'Text Preset';
     d.name = d.name.replace(/\b\w/g, (c) => c.toUpperCase());
     d.description = text.trim().slice(0, 300);
-    d.tags = [d.tag, 'Wavetable', d.mono ? 'Mono' : 'Poly'];
-    delete d.tag;
-    if (!d.mono) d.polyCount = 16;
-    return { design: d, notes };
+    d.category = baseName;
+    if (opts.author) d.author = opts.author;
+    return { design: normalizeDesign(d), notes };
   }
 
   function makePreset(text, opts) {
     const { design, notes } = textToDesign(text, opts);
-    if (opts && opts.author) design.author = opts.author;
-    return { bytes: buildPreset(design), design, notes, fileName: design.name.replace(/[\\/:*?"<>|]/g, '') + '.SerumPreset' };
+    return Object.assign({ design, notes }, presetFile(design));
   }
 
-  const api = { makePreset, textToDesign, buildPreset, buildState, packPreset, cborEncode, zstdRawFrame, md5Hex, hzToNorm, INIT };
+  /* ------------------------------------------------- AI (Claude) -> design */
+
+  // What Claude fills in. Kept flat with every field required so it works as a
+  // structured-output schema; fromAi() maps it onto a design and clamps it.
+  const AI_OSC_SCHEMA = (withEnabled) => ({
+    type: 'object',
+    additionalProperties: false,
+    required: (withEnabled ? ['enabled'] : []).concat(['wave', 'octave', 'unison', 'detune', 'level']),
+    properties: Object.assign(withEnabled ? { enabled: { type: 'boolean' } } : {}, {
+      wave: { type: 'string', enum: WAVES },
+      octave: { type: 'integer' },
+      unison: { type: 'integer' },
+      detune: { type: 'number' },
+      level: { type: 'number' },
+    }),
+  });
+  const AI_LAYER_SCHEMA = { type: 'object', additionalProperties: false, required: ['enabled', 'level'], properties: { enabled: { type: 'boolean' }, level: { type: 'number' } } };
+
+  const AI_DESIGN_SCHEMA = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['name', 'category', 'mono', 'oscA', 'oscB', 'sub', 'noise', 'filter', 'ampEnv', 'fx', 'notes'],
+    properties: {
+      name: { type: 'string' },
+      category: { type: 'string', enum: ['bass', 'sub', 'reese', 'lead', 'supersaw', 'pad', 'pluck', 'keys', 'bell', 'stab', 'arp'] },
+      mono: { type: 'boolean' },
+      oscA: AI_OSC_SCHEMA(false),
+      oscB: AI_OSC_SCHEMA(true),
+      sub: AI_LAYER_SCHEMA,
+      noise: AI_LAYER_SCHEMA,
+      filter: {
+        type: 'object', additionalProperties: false, required: ['enabled', 'cutoffHz', 'resonance'],
+        properties: { enabled: { type: 'boolean' }, cutoffHz: { type: 'number' }, resonance: { type: 'number' } },
+      },
+      ampEnv: {
+        type: 'object', additionalProperties: false, required: ['attackMs', 'decayMs', 'sustainPercent', 'releaseMs'],
+        properties: { attackMs: { type: 'number' }, decayMs: { type: 'number' }, sustainPercent: { type: 'number' }, releaseMs: { type: 'number' } },
+      },
+      fx: {
+        type: 'object', additionalProperties: false,
+        required: ['hyperWet', 'distortionDrive', 'distortionMix', 'compressor', 'reverbMix', 'delayMix'],
+        properties: {
+          hyperWet: { type: 'number' }, distortionDrive: { type: 'number' }, distortionMix: { type: 'number' },
+          compressor: { type: 'boolean' }, reverbMix: { type: 'number' }, delayMix: { type: 'number' },
+        },
+      },
+      notes: { type: 'array', items: { type: 'string' } },
+    },
+  };
+  const AI_PACK_SCHEMA = {
+    type: 'object', additionalProperties: false, required: ['presets'],
+    properties: { presets: { type: 'array', items: AI_DESIGN_SCHEMA } },
+  };
+
+  const AI_EXAMPLE = {
+    name: 'Grit Reese', category: 'reese', mono: true,
+    oscA: { wave: 'saw', octave: -1, unison: 2, detune: 0.2, level: 0.75 },
+    oscB: { enabled: true, wave: 'saw', octave: -1, unison: 2, detune: 0.3, level: 0.6 },
+    sub: { enabled: true, level: 0.5 }, noise: { enabled: false, level: 0.2 },
+    filter: { enabled: true, cutoffHz: 700, resonance: 12 },
+    ampEnv: { attackMs: 3, decayMs: 1000, sustainPercent: 100, releaseMs: 90 },
+    fx: { hyperWet: 0, distortionDrive: 65, distortionMix: 70, compressor: true, reverbMix: 0, delayMix: 0 },
+    notes: ['Two detuned saws an octave down give the reese movement.', 'Serum has no filter LFO here; add LFO 1 to Filter 1 cutoff for a wobble.'],
+  };
+
+  function aiInstructions(opts) {
+    opts = opts || {};
+    return [
+      'You design presets for the Xfer Serum 2 synthesizer. Turn the sound description into settings for the fixed preset template below.',
+      'Everything the template does not set stays at Serum 2\'s Init value.',
+      '',
+      'Fields:',
+      '- name: a short preset name, 2 to 4 words, no quotes. If the description gives a name, use it.',
+      '- category: the closest of bass, sub (808 / sub bass), reese, lead, supersaw, pad, pluck, keys, bell, stab, arp.',
+      '- mono: true for basses and most leads; false for pads, chords, keys and plucks.',
+      '- oscA (always on) and oscB (enabled true/false) are wavetable oscillators. wave: sine, triangle, saw, square, pulse or narrowpulse.',
+      '  octave: -3 to 3, relative to the played note (basses usually -1). unison: 1 to 16 voices.',
+      '  detune: 0 to 1 (0.1 subtle, 0.25 normal, 0.5 very wide; only matters when unison is above 1).',
+      '  level: 0 to 1 (0.75 is Serum\'s default; set oscB lower to blend it under oscA).',
+      '- sub: a sine sub oscillator. enabled, level 0 to 1.',
+      '- noise: a noise layer for air or texture. enabled, level 0 to 1 (0.1 to 0.3 is typical).',
+      '- filter: one 12 dB low-pass filter on oscA, oscB and noise (the sub bypasses it). enabled, cutoffHz 20 to 20000, resonance 0 to 100.',
+      '- ampEnv: the volume envelope. attackMs, decayMs, sustainPercent 0 to 100, releaseMs.',
+      '- fx: hyperWet 0 to 100 (stereo width and chorus; 0 is off), distortionDrive 0 to 100 (0 is off), distortionMix 0 to 100,',
+      '  compressor true/false (multiband, adds punch and loudness), reverbMix and delayMix 0 to 100 (0 is off).',
+      opts.experimentalFx
+        ? '  Reverb and delay are available.'
+        : '  Reverb and delay are switched off in this tool: always set reverbMix and delayMix to 0.',
+      '- notes: 2 to 5 short sentences for the musician: what you chose and why, and anything the template cannot do.',
+      '',
+      'The template cannot add modulation (LFO wobble, filter envelopes, pitch envelopes), glide, macros, other filter types or other wavetables.',
+      'When the description asks for one of these, get as close as the fields allow and say in notes what to set in Serum 2 afterwards.',
+      'Keep levels sensible: the sum of oscA, oscB, sub and noise levels should rarely go above 2.',
+    ].join('\n');
+  }
+
+  function aiSinglePrompt(text, opts) {
+    return aiInstructions(opts) + '\n\nReply with only one JSON object in exactly this shape (the values here are just an example):\n'
+      + JSON.stringify(AI_EXAMPLE) + '\n\nSound description:\n' + String(text).slice(0, 2000);
+  }
+
+  function aiPackPrompt(lines, opts) {
+    const list = lines.map((l, i) => (i + 1) + '. ' + String(l).slice(0, 500)).join('\n');
+    return aiInstructions(opts) + '\n\nDesign one preset for each numbered description below, in the same order, with distinct names.'
+      + '\nReply with only JSON in exactly this shape, one object per description (the values are just an example):\n'
+      + JSON.stringify({ presets: [AI_EXAMPLE] }) + '\n\nDescriptions:\n' + list;
+  }
+
+  // Maps Claude's answer onto a design. Starts from the keyword reading of the
+  // same text, so anything missing or malformed falls back to that.
+  function fromAi(ai, text, opts) {
+    opts = opts || {};
+    const base = textToDesign(text, opts).design;
+    const d = JSON.parse(JSON.stringify(base));
+    const notes = [];
+    if (!ai || typeof ai !== 'object') return { design: base, notes: ['Claude\'s answer couldn\'t be read, so the keyword reading is used.'] };
+
+    if (typeof ai.name === 'string' && ai.name.trim()) d.name = ai.name.trim().slice(0, 40);
+    if (BASES[ai.category]) d.category = ai.category;
+    if (typeof ai.mono === 'boolean') d.mono = ai.mono;
+    const osc = (target, src) => {
+      if (!src || typeof src !== 'object') return;
+      if (typeof src.enabled === 'boolean') target.on = src.enabled;
+      for (const k of ['wave', 'octave', 'unison', 'detune', 'level']) if (src[k] !== undefined) target[k] = src[k];
+    };
+    osc(d.oscA, ai.oscA);
+    osc(d.oscB, ai.oscB);
+    for (const k of ['sub', 'noise']) {
+      const src = ai[k];
+      if (src && typeof src === 'object') {
+        if (typeof src.enabled === 'boolean') d[k].on = src.enabled;
+        if (src.level !== undefined) d[k].level = src.level;
+      }
+    }
+    const f = ai.filter;
+    if (f && typeof f === 'object') {
+      if (typeof f.enabled === 'boolean') d.filter.on = f.enabled;
+      if (f.cutoffHz !== undefined) d.filter.cutoff = num(f.cutoffHz, d.filter.cutoff);
+      if (f.resonance !== undefined) d.filter.reso = num(f.resonance, d.filter.reso);
+    }
+    const e = ai.ampEnv;
+    if (e && typeof e === 'object') {
+      if (e.attackMs !== undefined) d.ampEnv.attack = num(e.attackMs, d.ampEnv.attack * 1000) / 1000;
+      if (e.decayMs !== undefined) d.ampEnv.decay = num(e.decayMs, d.ampEnv.decay * 1000) / 1000;
+      if (e.sustainPercent !== undefined) d.ampEnv.sustain = num(e.sustainPercent, d.ampEnv.sustain * 100) / 100;
+      if (e.releaseMs !== undefined) d.ampEnv.release = num(e.releaseMs, d.ampEnv.release * 1000) / 1000;
+    }
+    const x = ai.fx;
+    if (x && typeof x === 'object') {
+      const hyper = num(x.hyperWet, -1), drive = num(x.distortionDrive, -1);
+      if (hyper >= 0) d.fx.hyper = { on: hyper > 0, wet: hyper > 0 ? hyper : d.fx.hyper.wet };
+      if (drive >= 0) d.fx.dist = { on: drive > 0, drive: drive > 0 ? drive : d.fx.dist.drive, wet: num(x.distortionMix, d.fx.dist.wet) || d.fx.dist.wet };
+      if (typeof x.compressor === 'boolean') d.fx.comp = { on: x.compressor };
+      const rev = num(x.reverbMix, 0), del = num(x.delayMix, 0);
+      if (opts.experimentalFx) {
+        d.fx.reverb = { on: rev > 0, wet: rev > 0 ? rev : d.fx.reverb.wet, size: d.fx.reverb.size };
+        d.fx.delay = { on: del > 0, wet: del > 0 ? del : d.fx.delay.wet };
+      } else {
+        d.fx.reverb.on = false;
+        d.fx.delay.on = false;
+      }
+    }
+    if (Array.isArray(ai.notes)) for (const n of ai.notes.slice(0, 6)) if (typeof n === 'string' && n.trim()) notes.push(n.trim().slice(0, 300));
+    const design = normalizeDesign(d);
+    design.description = base.description;
+    return { design, notes };
+  }
+
+  const api = {
+    makePreset, textToDesign, normalizeDesign, varyDesign, presetFile, fileNameFor,
+    buildPreset, buildState, packPreset, cborEncode, zstdRawFrame, md5Hex, hzToNorm,
+    aiSinglePrompt, aiPackPrompt, aiInstructions, fromAi, AI_DESIGN_SCHEMA, AI_PACK_SCHEMA,
+    WAVES, CATEGORIES: Object.keys(BASES), MODULE_DEFAULTS, INIT,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SerumPresetMaker = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

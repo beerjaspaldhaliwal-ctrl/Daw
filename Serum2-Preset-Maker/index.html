@@ -4,7 +4,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  /* Layout: one centered work column; prompt panel on top, the patch it made laid out like a synth's module rows below. */
+  /* Layout: one work column. Describe on top, the synth-style editor with a playable keyboard in the middle, the batch list below. */
   :root {
     --bg: #eef0f4;
     --panel: #ffffff;
@@ -16,6 +16,8 @@
     --accent-ink: #ffffff;
     --signal: #c2410c;
     --ok: #15803d;
+    --key-white: #fbfbfd;
+    --key-black: #1f2533;
     --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
     --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -23,114 +25,203 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #12151d; --panel: #1a1f2a; --panel-2: #212735; --line: #2e3647; --ink: #e6e9f0; --muted: #98a2b6;
-      --accent: #7fa0ff; --accent-ink: #0d1220; --signal: #fb923c; --ok: #4ade80; color-scheme: dark;
+      --accent: #7fa0ff; --accent-ink: #0d1220; --signal: #fb923c; --ok: #4ade80; --key-white: #d9dde6; --key-black: #0b0e14; color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
     --bg: #12151d; --panel: #1a1f2a; --panel-2: #212735; --line: #2e3647; --ink: #e6e9f0; --muted: #98a2b6;
-    --accent: #7fa0ff; --accent-ink: #0d1220; --signal: #fb923c; --ok: #4ade80; color-scheme: dark;
+    --accent: #7fa0ff; --accent-ink: #0d1220; --signal: #fb923c; --ok: #4ade80; --key-white: #d9dde6; --key-black: #0b0e14; color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body);
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
     padding-block: 28px 48px;
   }
-  main { max-width: 860px; margin: 0 auto; display: grid; gap: 20px; }
+  main { max-width: 980px; margin: 0 auto; display: grid; gap: 20px; }
   header { display: grid; gap: 6px; }
   .eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
   h1 { font: 600 clamp(28px, 5vw, 40px)/1.1 var(--display); margin: 0; text-wrap: balance; letter-spacing: .01em; }
-  header p { margin: 0; color: var(--muted); max-width: 62ch; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; }
+  h2 { font: 600 20px/1.2 var(--display); margin: 0; text-wrap: balance; }
+  header p { margin: 0; color: var(--muted); max-width: 64ch; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
   label { font-weight: 600; font-size: 14px; }
-  textarea, input[type=text] {
+  textarea, input[type=text], input[type=password], select {
     width: 100%; font: 16px/1.5 var(--body); color: var(--ink); background: var(--panel-2);
-    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px;
   }
-  textarea { min-height: 92px; resize: vertical; }
-  textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  select { padding: 6px 8px; font-size: 14px; }
+  textarea { min-height: 88px; resize: vertical; }
+  textarea:focus, input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+  .field { display: grid; gap: 6px; min-width: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: end; }
+  .row > .field { flex: 1 1 220px; }
+  .hint { margin: 0; font-size: 13px; color: var(--muted); }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip {
-    font: 13px/1 var(--body); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line);
+    font: 13px/1.3 var(--body); color: var(--ink); background: var(--panel-2); border: 1px solid var(--line);
     border-radius: 999px; padding: 7px 12px; cursor: pointer; text-align: left;
   }
   .chip:hover { border-color: var(--accent); }
-  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; }
-  .row > .field { flex: 1 1 220px; display: grid; gap: 6px; min-width: 0; }
-  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; color: var(--muted); font-size: 14px; }
-  .check input { margin-top: 4px; }
-  button.primary {
-    font: 600 15px/1 var(--body); color: var(--accent-ink); background: var(--accent); border: 0;
-    border-radius: 8px; padding: 12px 18px; cursor: pointer;
+  button.primary, button.secondary, button.small {
+    font: 600 15px/1 var(--body); border-radius: 8px; padding: 11px 16px; cursor: pointer; border: 1px solid var(--accent);
   }
+  button.primary { color: var(--accent-ink); background: var(--accent); }
   button.primary:hover { filter: brightness(1.08); }
-  button.secondary {
-    font: 600 15px/1 var(--body); color: var(--accent); background: transparent; border: 1px solid var(--accent);
-    border-radius: 8px; padding: 11px 16px; cursor: pointer;
-  }
-  button.secondary:hover { background: var(--panel-2); }
+  button.secondary, button.small { color: var(--accent); background: transparent; }
+  button.secondary:hover, button.small:hover { background: var(--panel-2); }
+  button.small { font-size: 13px; padding: 6px 10px; }
+  button:disabled { opacity: .45; cursor: default; }
   button.link { font: inherit; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .folder { margin: 0; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
-  .folder code { overflow-wrap: anywhere; color: var(--ink); }
-  ol.steps { padding-left: 20px; display: grid; gap: 6px; }
-  .result-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; }
-  .result-head h2 { font: 600 22px/1.2 var(--display); margin: 0; overflow-wrap: anywhere; }
-  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .tag { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; color: var(--muted); }
-  .modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-  .mod { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; align-content: start; min-width: 0; }
-  .mod.off { opacity: .55; }
-  .mod h3 { font: 600 12px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 4px; color: var(--muted); display: flex; justify-content: space-between; }
-  .mod h3 .led { width: 8px; height: 8px; border-radius: 50%; background: var(--line); align-self: center; }
-  .mod:not(.off) h3 .led { background: var(--ok); }
-  .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
-  .kv span:last-child { font: 13px var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
-  .notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; display: grid; gap: 2px; }
-  .status { font-size: 14px; color: var(--muted); min-height: 1.4em; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tabs button {
+    font: 600 14px/1 var(--body); color: var(--muted); background: none; border: 0; border-bottom: 2px solid transparent;
+    padding: 10px 12px; cursor: pointer; margin-bottom: -1px;
+  }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  .mode { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; }
+  .mode legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
+  .mode label, .check { font-weight: 400; display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+  .mode input, .check input { margin-top: 4px; }
+  .check { color: var(--muted); }
+  .key-box { display: grid; gap: 8px; }
+
+  .status { font-size: 14px; color: var(--muted); min-height: 1.4em; margin: 0; }
   .status.err { color: var(--signal); }
+
+  .result-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: end; }
+  .name-field { flex: 1 1 260px; display: grid; gap: 6px; min-width: 0; }
+  #name { font: 600 20px/1.2 var(--display); }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; color: var(--muted); }
+  .folder { margin: 0; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; overflow-wrap: anywhere; }
+
+  .player { display: grid; gap: 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .player-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #scope { flex: 1 1 160px; width: 160px; height: 40px; min-width: 0; color: var(--accent); }
+  .octave { display: flex; gap: 6px; align-items: center; font: 13px var(--mono); color: var(--muted); }
+  .keys { position: relative; height: 112px; display: flex; user-select: none; touch-action: none; }
+  .key { border: 1px solid var(--line); cursor: pointer; padding: 0; }
+  .key.white { background: var(--key-white); height: 100%; border-radius: 0 0 5px 5px; }
+  .key.black { position: absolute; top: 0; width: calc(100% / 14 * 0.6); height: 62%; background: var(--key-black); border-color: var(--key-black); border-radius: 0 0 4px 4px; z-index: 1; }
+  .key.down { background: var(--accent); border-color: var(--accent); }
+
+  .modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+  .mod { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+  .mod.off .ctl, .mod.off .env-draw { opacity: .5; }
+  .mod-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .mod-title, .mod-toggle span { font: 600 12px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .mod-toggle { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .badge { font: 500 10px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--signal); border: 1px solid currentColor; border-radius: 4px; padding: 3px 5px; }
+  .ctl { display: grid; grid-template-columns: 74px 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
+  .ctl label { font-weight: 400; font-size: 13px; }
+  .ctl output { font: 12px var(--mono); font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; }
+  .ctl select { grid-column: 2 / 4; }
+  .env-draw svg { width: 100%; height: 52px; display: block; }
+  .env-draw polyline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+
+  .vary { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
+  .vary .field { flex: 0 1 150px; }
+  .notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; display: grid; gap: 2px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; background: var(--panel-2); min-width: 0; }
+  .card.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .card-top { display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
+  .card-top input { margin-top: 5px; }
+  .card-sum { font-size: 13px; color: var(--muted); }
+  .card-actions { display: flex; gap: 8px; align-items: center; }
+  .editing { font-size: 13px; color: var(--accent); font-weight: 600; }
+  .list-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: baseline; }
+
   details { color: var(--muted); font-size: 14px; }
   details summary { cursor: pointer; color: var(--ink); font-weight: 600; }
-  details ul { padding-left: 18px; display: grid; gap: 4px; }
-  code { font: 13px var(--mono); }
-  @media (prefers-reduced-motion: no-preference) { .mod { transition: opacity .2s; } }
+  details ul, details ol { padding-left: 20px; display: grid; gap: 5px; }
+  code { font: 13px var(--mono); overflow-wrap: anywhere; }
+  kbd { font: 12px var(--mono); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; background: var(--panel-2); }
+  @media (max-width: 480px) {
+    .ctl { grid-template-columns: 64px 1fr auto; }
+    .keys { height: 96px; }
+  }
 </style>
 
 <main>
   <header>
     <span class="eyebrow">Text → .SerumPreset</span>
     <h1>Serum 2 Preset Maker</h1>
-    <p>Describe a sound in plain words. You get a Serum 2 preset you can drag into the plugin or drop into your Serum 2 presets folder.</p>
+    <p>Describe a sound, hear it, fine-tune it, and save it as a Serum 2 preset. Make variations of a sound or a whole pack at once.</p>
   </header>
 
-  <form class="panel" id="form">
-    <div class="field" style="display:grid;gap:6px">
+  <form class="panel" id="describe">
+    <div class="tabs" role="tablist" aria-label="What to make">
+      <button type="button" role="tab" id="tab-one-btn" aria-controls="tab-one">One sound</button>
+      <button type="button" role="tab" id="tab-pack-btn" aria-controls="tab-pack">Pack</button>
+    </div>
+    <div id="tab-one" role="tabpanel" aria-labelledby="tab-one-btn" class="field">
       <label for="prompt">Describe the sound</label>
       <textarea id="prompt" spellcheck="false">dark wide reese bass with distortion</textarea>
+      <div class="chips" aria-label="Examples">
+        <button type="button" class="chip">huge supersaw lead, bright, detuned</button>
+        <button type="button" class="chip">warm evolving pad with slow attack and long release</button>
+        <button type="button" class="chip">short bright pluck, punchy</button>
+        <button type="button" class="chip">808 sub bass called "Deep 808"</button>
+        <button type="button" class="chip">acid lead with resonance 70 and cutoff 600hz</button>
+      </div>
     </div>
-    <div class="chips" aria-label="Examples">
-      <button type="button" class="chip">huge supersaw lead, bright, detuned</button>
-      <button type="button" class="chip">warm evolving pad with slow attack and long release</button>
-      <button type="button" class="chip">short bright pluck, punchy</button>
-      <button type="button" class="chip">808 sub bass called "Deep 808"</button>
-      <button type="button" class="chip">acid lead with resonance 70 and cutoff 600hz</button>
-      <button type="button" class="chip">square arp, attack 5ms, decay 300ms, sustain 20%</button>
+    <div id="tab-pack" role="tabpanel" aria-labelledby="tab-pack-btn" class="field" hidden>
+      <label for="packList">One description per line (up to 16)</label>
+      <textarea id="packList" spellcheck="false" rows="6">deep 808 sub bass
+dirty reese bass
+huge supersaw lead
+short bright pluck
+warm evolving pad
+punchy chord stab</textarea>
+      <div class="field">
+        <label for="packName">Pack name (used as the folder name)</label>
+        <input type="text" id="packName" value="My Pack">
+      </div>
     </div>
+
+    <fieldset class="mode">
+      <legend>Read the text with</legend>
+      <label><input type="radio" name="mode" id="mode-keywords" value="keywords" checked> Keywords: instant, works offline</label>
+      <label id="mode-ai-label"><input type="radio" name="mode" id="mode-ai" value="ai"> Claude AI: understands any words</label>
+    </fieldset>
+    <div class="key-box" id="ai-key" hidden>
+      <div class="field">
+        <label for="apiKey">Anthropic API key</label>
+        <input type="password" id="apiKey" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+      </div>
+      <label class="check"><input type="checkbox" id="rememberKey"> Remember the key on this computer</label>
+      <p class="hint">Get a key at console.anthropic.com. Requests go from this computer straight to Anthropic and are billed to that account.</p>
+    </div>
+    <p class="hint" id="ai-note"></p>
+
     <div class="row">
       <div class="field">
         <label for="author">Author (optional)</label>
         <input type="text" id="author" placeholder="Your name">
       </div>
-      <button class="primary" type="submit" id="make">Make preset</button>
+      <div class="actions">
+        <button class="primary" type="submit" id="make">Make preset</button>
+        <button class="secondary" type="button" id="stop" hidden>Stop</button>
+      </div>
     </div>
-    <label class="check"><input type="checkbox" id="exp"> Include reverb and delay when asked for (experimental: these settings are a best guess and haven't been tested in Serum 2 yet)</label>
+    <label class="check"><input type="checkbox" id="exp"> Allow reverb and delay (experimental: these settings are a best guess and haven't been tested in Serum 2 yet)</label>
+    <p class="status" id="genStatus" aria-live="polite"></p>
   </form>
 
-  <section class="panel" id="result" aria-live="polite">
+  <section class="panel" id="sound" aria-label="Sound editor">
     <div class="result-head">
-      <div>
-        <h2 id="r-name">–</h2>
+      <div class="name-field">
+        <label for="name">Preset name</label>
+        <input type="text" id="name" spellcheck="false">
         <div class="tags" id="r-tags"></div>
       </div>
       <div class="actions">
@@ -139,27 +230,85 @@
       </div>
     </div>
     <p class="folder" id="folder" hidden><span id="folder-text"></span> <button class="link" type="button" id="change">Choose a different folder</button></p>
-    <div class="status" id="status"></div>
+    <p class="status" id="status" aria-live="polite"></p>
+
+    <div class="player">
+      <div class="player-top">
+        <button class="primary" type="button" id="play">Play demo</button>
+        <button class="secondary" type="button" id="silence">Stop sound</button>
+        <canvas id="scope" aria-hidden="true"></canvas>
+        <div class="octave">
+          <button class="small" type="button" id="oct-down" aria-label="Octave down">−</button>
+          <span id="octave-label">C3–B4</span>
+          <button class="small" type="button" id="oct-up" aria-label="Octave up">+</button>
+        </div>
+      </div>
+      <div class="keys" id="keys"></div>
+      <p class="hint">Click the keys, or play with your computer keyboard: <kbd>A</kbd>–<kbd>;</kbd> for notes, <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> for sharps, <kbd>Z</kbd>/<kbd>X</kbd> to change octave. The preview is an approximation; Serum 2 will sound richer.</p>
+    </div>
+
     <div class="modules" id="modules"></div>
+
+    <div class="vary">
+      <div class="field">
+        <label for="varCount">Variations</label>
+        <select id="varCount"><option value="4">4 presets</option><option value="6" selected>6 presets</option><option value="8">8 presets</option></select>
+      </div>
+      <div class="field">
+        <label for="varAmount">How different</label>
+        <select id="varAmount"><option value="0.3">A little</option><option value="0.55" selected>Clearly</option><option value="0.85">A lot</option></select>
+      </div>
+      <button class="secondary" type="button" id="vary">Make variations of this sound</button>
+      <button class="secondary" type="button" id="undo">Undo my changes</button>
+    </div>
+
     <div>
-      <strong style="font-size:14px">What the text was read as</strong>
+      <strong style="font-size:14px">Why it sounds like this</strong>
       <ul class="notes" id="notes"></ul>
     </div>
+  </section>
+
+  <section class="panel" id="listPanel" hidden aria-label="Presets in this batch">
+    <div class="list-head">
+      <h2>Presets in this batch</h2>
+      <span class="hint" id="list-count"></span>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="row">
+      <div class="field">
+        <label for="batchName">Folder name for the batch</label>
+        <input type="text" id="batchName" spellcheck="false">
+      </div>
+      <div class="actions">
+        <button class="secondary" type="button" id="all-none">Tick all / none</button>
+        <button class="primary" type="button" id="save-all" hidden>Save ticked to presets folder</button>
+        <button class="primary" type="button" id="dl-all">Download ticked (.zip)</button>
+      </div>
+    </div>
+    <p class="status" id="listStatus" aria-live="polite"></p>
   </section>
 
   <section class="panel">
     <details>
       <summary>Using it with FL Studio</summary>
-      <ol class="steps">
+      <ol>
         <li>Run the Windows installer. It makes a presets folder inside Serum 2's user presets (<code>Documents\Xfer\Serum 2 Presets\Presets\User\Preset Maker</code>), or <code>Documents\Serum 2 Preset Maker\Presets</code> if Serum 2 isn't installed.</li>
         <li>In FL Studio, drag that folder from File Explorer onto the Browser on the left. You only do this once.</li>
         <li>In the Browser's options menu, turn on <b>Show unknown file types</b>. Without it, FL Studio hides <code>.SerumPreset</code> files.</li>
-        <li>Here, click <b>Save to presets folder</b>. The first time, pick the folder from step 1. Edge and Chrome remember it.</li>
+        <li>Here, click <b>Save to presets folder</b>. The first time, pick the folder from step 1. Edge and Chrome remember it. A batch goes into a subfolder named after it.</li>
         <li>In FL Studio, drag the preset from the Browser onto Serum 2. To see it in Serum 2's own browser, rescan presets from Serum 2's menu.</li>
       </ol>
     </details>
     <details>
-      <summary>Words it understands</summary>
+      <summary>Claude AI</summary>
+      <ul>
+        <li>With <b>Claude AI</b> selected, Claude reads your description and picks every setting, so any words work ("spooky", "like a dubstep growl", "Daft Punk style lead"). It also explains its choices under "Why it sounds like this".</li>
+        <li>Online, it uses your Claude account. In the installed version it needs an Anthropic API key, which is billed to that account.</li>
+        <li>Packs are designed in one request. If Claude can't answer, the keyword reading is used instead and the page says why.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>Words the keyword reader understands</summary>
       <ul>
         <li><b>Sound type:</b> bass, reese, 808 / sub bass, lead, supersaw / trance, pad, pluck, keys / piano, bell, stab / chord, arp</li>
         <li><b>Tone:</b> dark, warm, mellow, bright, airy, resonant / acid, wide / huge / lush, detuned, thin, chorus</li>
@@ -173,11 +322,11 @@
     <details>
       <summary>What gets set, and what doesn't yet</summary>
       <ul>
-        <li>Each preset starts from Serum 2's own Init patch, so any setting not listed above stays at its Init value.</li>
+        <li>Each preset starts from Serum 2's own Init patch, so anything not in the editor stays at its Init value.</li>
         <li>Oscillators use the factory <code>Analog/Basic Shapes</code> wavetable. The waveform positions are approximate.</li>
-        <li>No modulation routings yet (no LFO or envelope on the cutoff). Add these in Serum after loading.</li>
-        <li>Envelope decay and sustain use parameter names that haven't been confirmed from a real preset yet. If they don't take effect, set them in Serum.</li>
-        <li>Inside claude.ai, the download comes as a <code>.zip</code> holding the preset. Open <code>index.html</code> from the repo on your computer to save the <code>.SerumPreset</code> file directly.</li>
+        <li>No modulation yet (no LFO or envelope on the cutoff, no glide). Add these in Serum after loading.</li>
+        <li>Envelope decay, sustain and hold, and the sub octave, use parameter names that haven't been confirmed from a real preset yet. If they don't take effect, set them in Serum.</li>
+        <li>Inside claude.ai, downloads come as a <code>.zip</code>. The installed Windows version saves <code>.SerumPreset</code> files straight into your presets folder.</li>
       </ul>
     </details>
   </section>
@@ -185,199 +334,5 @@
 
 <script src="config.js"></script>
 <script src="engine.js"></script>
-<script>
-(function () {
-  const $ = (id) => document.getElementById(id);
-  const E = window.SerumPresetMaker;
-  let current = null;
-
-  function fmtTime(s) { return s < 1 ? Math.round(s * 1000) + ' ms' : (+s.toFixed(2)) + ' s'; }
-  function pct(v) { return Math.round(v * 100) + '%'; }
-  const WAVE = { sine: 'Sine', saw: 'Saw', triangle: 'Triangle', square: 'Square', pulse: 'Pulse' };
-
-  function mod(title, on, rows) {
-    const el = document.createElement('div');
-    el.className = 'mod' + (on ? '' : ' off');
-    const h = document.createElement('h3');
-    h.textContent = title;
-    const led = document.createElement('span'); led.className = 'led'; h.appendChild(led);
-    el.appendChild(h);
-    for (const [k, v] of rows) {
-      const r = document.createElement('div'); r.className = 'kv';
-      const a = document.createElement('span'); a.textContent = k;
-      const b = document.createElement('span'); b.textContent = v;
-      r.append(a, b); el.appendChild(r);
-    }
-    return el;
-  }
-  function oscRows(o) {
-    const r = [['Wave', WAVE[o.wave] || o.wave], ['Octave', (o.octave > 0 ? '+' : '') + (o.octave || 0)]];
-    r.push(['Unison', String(o.unison || 1)]);
-    if (o.unison > 1) r.push(['Detune', (o.detune || 0.25).toFixed(2)]);
-    if (o.level !== undefined) r.push(['Level', pct(o.level)]);
-    return r;
-  }
-
-  function render(res) {
-    const d = res.design;
-    $('r-name').textContent = d.name;
-    $('r-tags').replaceChildren(...d.tags.map((t) => { const s = document.createElement('span'); s.className = 'tag'; s.textContent = t; return s; }));
-    const m = $('modules');
-    m.replaceChildren(
-      mod('Osc A', true, oscRows(d.oscA)),
-      mod('Osc B', !!d.oscB, d.oscB ? oscRows(d.oscB) : [['Off', '']]),
-      mod('Sub', !!d.sub, d.sub ? [['Level', pct(d.sub.level)]] : [['Off', '']]),
-      mod('Noise', !!d.noise, d.noise ? [['Level', pct(d.noise.level)]] : [['Off', '']]),
-      mod('Filter 1', !!d.filter, d.filter ? [['Type', 'MG Low 12'], ['Cutoff', d.filter.cutoff + ' Hz'], ['Resonance', String(Math.round(d.filter.reso))]] : [['Off', '']]),
-      mod('Env 1 (amp)', true, [['Attack', fmtTime(d.ampEnv.attack)], ['Decay', fmtTime(d.ampEnv.decay)], ['Sustain', pct(d.ampEnv.sustain)], ['Release', fmtTime(d.ampEnv.release)]]),
-      mod('Voicing', true, [['Mode', d.mono ? 'Mono' : 'Poly'], ['Voices', d.mono ? '1' : String(d.polyCount || 16)]]),
-      mod('FX', Object.keys(d.fx).length > 0, fxRows(d.fx)),
-    );
-    $('notes').replaceChildren(...res.notes.map((n) => { const li = document.createElement('li'); li.textContent = n; return li; }));
-  }
-  function fxRows(fx) {
-    const r = [];
-    if (fx.hyper) r.push(['Hyper/Dimension', fx.hyper.wet + '%']);
-    if (fx.dist) r.push(['Distortion', 'drive ' + fx.dist.drive]);
-    if (fx.comp) r.push(['Compressor', 'multiband']);
-    if (fx.delay) r.push(['Delay*', fx.delay.wet + '%']);
-    if (fx.reverb) r.push(['Reverb*', fx.reverb.wet + '%']);
-    return r.length ? r : [['None', '']];
-  }
-
-  function make() {
-    const text = $('prompt').value.trim();
-    if (!text) { $('status').textContent = 'Type a description first, for example "warm pad with slow attack".'; $('status').className = 'status err'; return; }
-    current = E.makePreset(text, { experimentalFx: $('exp').checked, author: $('author').value.trim() || undefined });
-    render(current);
-    $('status').className = 'status';
-    $('status').textContent = current.fileName + ' · ' + (current.bytes.length / 1024).toFixed(1) + ' KB';
-  }
-
-  // Minimal stored (uncompressed) zip, used where the viewer only allows .zip saves.
-  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
-  function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
-  function zip(name, data) {
-    const nm = new TextEncoder().encode(name), crc = crc32(data), n = data.length;
-    const lh = new DataView(new ArrayBuffer(30));
-    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
-    lh.setUint32(14, crc, true); lh.setUint32(18, n, true); lh.setUint32(22, n, true); lh.setUint16(26, nm.length, true);
-    const cd = new DataView(new ArrayBuffer(46));
-    cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true);
-    cd.setUint32(16, crc, true); cd.setUint32(20, n, true); cd.setUint32(24, n, true); cd.setUint16(28, nm.length, true);
-    const cdOff = 30 + nm.length + n, cdLen = 46 + nm.length;
-    const end = new DataView(new ArrayBuffer(22));
-    end.setUint32(0, 0x06054b50, true); end.setUint16(8, 1, true); end.setUint16(10, 1, true);
-    end.setUint32(12, cdLen, true); end.setUint32(16, cdOff, true);
-    return new Blob([lh, nm, data, cd, nm, end]);
-  }
-
-  let downloadsCap;
-  const capReady = (window.claude && window.claude.use ? window.claude.use('downloads') : Promise.resolve(null))
-    .then((d) => { downloadsCap = d; if (d) $('dl').textContent = 'Download preset (.zip)'; })
-    .catch(() => { downloadsCap = null; });
-
-  async function download() {
-    if (!current) make();
-    if (!current) return;
-    await capReady;
-    if (downloadsCap) {
-      try {
-        await downloadsCap.save({ filename: current.fileName.replace(/\.SerumPreset$/, '') + '.zip', data: zip(current.fileName, current.bytes) });
-        $('status').textContent = 'Saved. Unzip it and drag the .SerumPreset file into Serum 2.';
-      } catch (e) {
-        $('status').className = 'status err';
-        $('status').textContent = e && e.code === 'declined' ? 'Download cancelled.' : 'This view can\'t save files. Open index.html from the repo on your computer instead.';
-      }
-      return;
-    }
-    const url = URL.createObjectURL(new Blob([current.bytes], { type: 'application/octet-stream' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = current.fileName;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-    $('status').textContent = 'Saved ' + current.fileName + '. Drag it into Serum 2.';
-  }
-
-  /* Save straight into a folder (Edge and Chrome on the installed copy). The folder
-     handle is kept in IndexedDB so the next session only asks to confirm access. */
-  const CFG = window.PRESET_MAKER_CONFIG || {};
-  const canPickFolder = location.protocol === 'file:' && typeof window.showDirectoryPicker === 'function';
-  let dirHandle = null;
-
-  function idb(mode, fn) {
-    return new Promise((resolve, reject) => {
-      const open = indexedDB.open('serum2-preset-maker', 1);
-      open.onupgradeneeded = () => open.result.createObjectStore('kv');
-      open.onerror = () => reject(open.error);
-      open.onsuccess = () => {
-        const tx = open.result.transaction('kv', mode), req = fn(tx.objectStore('kv'));
-        tx.oncomplete = () => resolve(req.result);
-        tx.onerror = () => reject(tx.error);
-      };
-    });
-  }
-  const loadHandle = () => idb('readonly', (s) => s.get('dir')).catch(() => null);
-  const storeHandle = (h) => idb('readwrite', (s) => s.put(h, 'dir')).catch(() => {});
-
-  function showFolder() {
-    $('folder').hidden = false;
-    $('change').hidden = !dirHandle;
-    $('folder-text').textContent = dirHandle
-      ? (dirHandle.name ? 'Saving to the "' + dirHandle.name + '" folder.' : 'Saving to the folder you chose.')
-      : CFG.presetDir ? 'The first time you save, pick this folder: ' + CFG.presetDir : 'The first time you save, pick the folder you added to FL Studio\'s Browser.';
-  }
-
-  async function freeName(dir, name) {
-    const base = name.replace(/\.SerumPreset$/, '');
-    for (let i = 1; i < 1000; i++) {
-      const candidate = i === 1 ? name : base + ' ' + i + '.SerumPreset';
-      try { await dir.getFileHandle(candidate); } catch (e) { return candidate; }
-    }
-    return base + ' ' + Date.now() + '.SerumPreset';
-  }
-
-  async function saveToFolder(pickNew) {
-    if (!current) make();
-    if (!current) return;
-    $('status').className = 'status';
-    try {
-      let dir = pickNew ? null : dirHandle || await loadHandle();
-      if (dir) {
-        let perm = await dir.queryPermission({ mode: 'readwrite' });
-        if (perm !== 'granted') perm = await dir.requestPermission({ mode: 'readwrite' });
-        if (perm !== 'granted') dir = null;
-      }
-      if (!dir) {
-        dir = await window.showDirectoryPicker({ id: 'serum-presets', mode: 'readwrite', startIn: 'documents' });
-        await storeHandle(dir);
-      }
-      dirHandle = dir;
-      const name = await freeName(dir, current.fileName);
-      const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
-      await writable.write(current.bytes);
-      await writable.close();
-      showFolder();
-      $('status').textContent = 'Saved "' + name + '". Drag it from FL Studio\'s Browser onto Serum 2.';
-    } catch (e) {
-      $('status').className = 'status err';
-      $('status').textContent = e && e.name === 'AbortError' ? 'No folder chosen, so nothing was saved.'
-        : 'Couldn\'t save to the folder (' + (e && e.message || e) + '). Use Download instead.';
-    }
-  }
-
-  if (canPickFolder) {
-    $('save').hidden = false;
-    $('dl').className = 'secondary';
-    $('dl').textContent = 'Download';
-    loadHandle().then((h) => { dirHandle = h || null; showFolder(); });
-    $('save').addEventListener('click', () => saveToFolder(false));
-    $('change').addEventListener('click', () => saveToFolder(true));
-  }
-
-  $('form').addEventListener('submit', (e) => { e.preventDefault(); make(); });
-  $('dl').addEventListener('click', download);
-  for (const c of document.querySelectorAll('.chip')) c.addEventListener('click', () => { $('prompt').value = c.textContent; make(); });
-  make();
-})();
-</script>
+<script src="synth.js"></script>
+<script src="app.js"></script>

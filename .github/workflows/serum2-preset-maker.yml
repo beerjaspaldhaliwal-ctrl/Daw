@@ -59,12 +59,14 @@ jobs:
           $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=desktopicon" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
           $app = Join-Path $env:LOCALAPPDATA "Programs\Serum 2 Preset Maker"
-          foreach ($f in "index.html", "engine.js", "config.js", "README.md", "FL-Studio-Setup.txt") { if (-not (Test-Path "$app\$f")) { throw "missing after install: $app\$f" } }
+          foreach ($f in "index.html", "engine.js", "synth.js", "app.js", "config.js", "README.md", "FL-Studio-Setup.txt") { if (-not (Test-Path "$app\$f")) { throw "missing after install: $app\$f" } }
           $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Serum 2 Preset Maker"
           foreach ($l in "Serum 2 Preset Maker.lnk", "Presets folder.lnk", "FL Studio setup steps.lnk") { if (-not (Test-Path "$menu\$l")) { throw "Start menu shortcut missing: $l" } }
           $desk = Join-Path ([Environment]::GetFolderPath("Desktop")) "Serum 2 Preset Maker.lnk"
           if (-not (Test-Path $desk)) { throw "desktop shortcut missing" }
-          if ((Get-FileHash "$app\engine.js").Hash -ne (Get-FileHash Serum2-Preset-Maker/engine.js).Hash) { throw "installed engine differs" }
+          foreach ($f in "engine.js", "synth.js", "app.js", "index.html") {
+            if ((Get-FileHash "$app\$f").Hash -ne (Get-FileHash "Serum2-Preset-Maker/$f").Hash) { throw "installed $f differs" }
+          }
           $presets = "$docs\Serum 2 Preset Maker\Presets"
           if (-not (Test-Path $presets -PathType Container)) { throw "presets folder not created: $presets" }
           node Serum2-Preset-Maker/test/check-config.js "$app\config.js" $presets false

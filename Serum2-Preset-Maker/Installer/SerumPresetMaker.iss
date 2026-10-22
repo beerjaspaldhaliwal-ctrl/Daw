@@ -1,7 +1,7 @@
 ; Serum 2 Preset Maker for FL Studio — Windows installer (Inno Setup 6)
 ;
 ; Build (from the repository's Serum2-Preset-Maker directory):
-;   iscc /DAppVersion=1.1.0 /DOutputDir="<path>" Installer\SerumPresetMaker.iss
+;   iscc /DAppVersion=2.0.0 /DOutputDir="<path>" Installer\SerumPresetMaker.iss
 ;
 ; Installs for the current user only (no admin prompt) to
 ;   %LOCALAPPDATA%\Programs\Serum 2 Preset Maker
@@ -13,7 +13,7 @@
 ; FL Studio's own settings are not changed: the user adds the folder to FL Studio's Browser (see FL-Studio-Setup.txt).
 
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #define AppVersion "2.0.0"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\build\installer"
@@ -47,6 +47,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "..\index.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\engine.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\synth.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\app.js"; DestDir: "{app}"; Flags: ignoreversion
 ; Replaced after install with the real presets folder (see CurStepChanged).
 Source: "..\config.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion

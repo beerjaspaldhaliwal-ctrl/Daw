@@ -1,6 +1,7 @@
 # Serum 2 Preset Maker
 
 Type a description like `dark wide reese bass with distortion` and get a `.SerumPreset` file for Xfer Serum 2.
+Hear it in the browser, fine-tune every setting, make variations, or make a whole pack at once.
 
 ## Install on Windows (with FL Studio)
 
@@ -19,12 +20,19 @@ The installer doesn't change FL Studio's settings itself. To remove it: **Settin
 
 ## Use it
 
-1. Open `index.html` in a browser (or use the installed shortcut; no internet needed).
-2. Describe the sound, press **Make preset**, then **Download .SerumPreset**.
-3. Drag the file onto Serum 2, or copy it into your Serum 2 presets folder
-   (Windows: `Documents\Xfer\Serum 2 Presets\Presets\User`).
+1. Open `index.html` in a browser (or use the installed shortcut).
+2. Describe the sound and press **Make preset**. Or open the **Pack** tab, write one description per line and press **Make pack**.
+3. Press **Play demo**, click the on-screen keys, or play with your computer keyboard (`A`–`;`, `Z`/`X` for octave) to hear a preview.
+4. Adjust anything in the editor: oscillators, sub, noise, filter, envelope, voicing and effects. **Undo my changes** goes back to what was generated.
+5. **Make variations of this sound** gives 4–8 nearby versions. Play them, untick the ones you don't want, and save the rest together.
+6. **Save to presets folder** (Edge or Chrome, installed version) or **Download**. A batch is saved into a subfolder named after it, or downloaded as one `.zip`.
 
-The **Words it understands** section on the page lists the keywords: sound types (bass, reese, 808, lead, supersaw, pad, pluck, keys, bell, stab, arp), tone words (dark, warm, bright, wide, detuned, dirty, punchy, …) and exact values (`attack 10ms`, `release 1.2s`, `cutoff 800hz`, `resonance 40`, `unison 7`, `octave -1`). Put a name in quotes or write `called My Preset` to name it.
+The preview is a small Web Audio synth that follows the same settings. It is an approximation: Serum 2's oscillators, filter and effects sound richer.
+
+### Reading the text
+
+- **Keywords** (instant, offline): sound types (bass, reese, 808, lead, supersaw, pad, pluck, keys, bell, stab, arp), tone words (dark, warm, bright, wide, detuned, dirty, punchy, …) and exact values (`attack 10ms`, `release 1.2s`, `cutoff 800hz`, `resonance 40`, `unison 7`, `octave -1`). Put a name in quotes or write `called My Preset` to name it.
+- **Claude AI**: Claude reads the description and picks every setting, so any words work, and explains its choices. Online (claude.ai) it uses your Claude account. The installed version needs an Anthropic API key from console.anthropic.com, which is billed to that account; it calls `claude-opus-5-5` with structured outputs from the browser using the official SDK. If Claude can't answer, the keyword reading is used and the page says why.
 
 ## How it works
 
@@ -46,7 +54,7 @@ Parameter names and units come from real Serum 2 presets, except where marked *g
 | Section | Set | Notes |
 |---|---|---|
 | Osc A / B | on/off, wavetable position, octave, pan, unison, detune, level | Uses the factory `Analog/Basic Shapes` table; the waveform positions are approximate |
-| Sub, Noise | on/off, level | |
+| Sub, Noise | on/off, level, *sub octave (guess)* | The sub is set an octave down by default, under the oscillators |
 | Filter 1 | on, cutoff, resonance | Default type (MG Low 12). Cutoff is stored 0–1 on a log scale, so the Hz values are approximate |
 | Env 1 (amp) | attack, release, *decay, sustain, hold (guess)* | |
 | Global | mono, polyphony | |
@@ -61,4 +69,14 @@ If a setting doesn't come through in Serum, open an issue with the prompt you us
 node test/verify.js
 ```
 
-The test builds presets from sample prompts, decodes each file with its own CBOR decoder and Node's zstd, and checks that the hash, the container fields and the full state match. It needs Node 22.15 or newer.
+The test builds presets from sample prompts, from hand-broken designs, from variations and from sample Claude answers. It decodes each file with its own CBOR decoder and Node's zstd, and checks that the hash, the container fields and the full state match. It also checks that the Claude answer schemas follow the structured-output rules. It needs Node 22.15 or newer.
+
+## Files
+
+| File | What it does |
+|---|---|
+| `index.html` | The page and its styles |
+| `app.js` | Page logic: editor, keyboard, batch list, saving, Claude requests |
+| `engine.js` | Text and Claude answers to designs, variations, and designs to `.SerumPreset` files |
+| `synth.js` | The Web Audio preview synth |
+| `config.js` | The presets folder; the Windows installer rewrites it |

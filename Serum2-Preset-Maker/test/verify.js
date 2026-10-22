@@ -101,4 +101,120 @@ assert.strictEqual(engine.textToDesign('808 sub bass called "Deep 808"').design.
 assert.ok(engine.textToDesign('dark bass with sub').design.sub, 'bass with sub keeps bass base and adds sub');
 assert.ok(engine.textToDesign('dark wide reese bass with distortion').design.fx.dist);
 
+// Every design the page can produce must build and decode, so check the other sources too.
+function roundTrip(design, label) {
+  const { bytes, fileName } = engine.presetFile(design);
+  const { meta, state } = unpack(bytes);
+  const round = (v) => JSON.parse(JSON.stringify(v, (k, x) => (typeof x === 'number' ? Math.fround(x) : x)));
+  assert.deepStrictEqual(round(state), round(JSON.parse(JSON.stringify(engine.buildState(design)))), label);
+  assert.ok(fileName.endsWith('.SerumPreset'), label);
+  n++;
+  return { meta, state };
+}
+
+// normalizeDesign: garbage in, valid design out.
+const junk = engine.normalizeDesign({
+  name: 'bad/name:*?', category: 'nope', mono: 1,
+  oscA: { wave: 'wobble', octave: 99, unison: -3, detune: 7, level: NaN },
+  oscB: { on: true, unison: 40 }, sub: { level: 9, octave: -9 }, noise: { sample: 'x' },
+  filter: { cutoff: 1e9, reso: -5 }, ampEnv: { attack: -1, decay: 0, sustain: 2, release: 'slow' },
+  fx: { hyper: { wet: 500 }, dist: { on: false }, comp: true, reverb: {}, delay: null },
+});
+assert.strictEqual(junk.name, 'badname');
+assert.strictEqual(junk.category, 'lead');
+assert.strictEqual(junk.oscA.wave, 'saw');
+assert.strictEqual(junk.oscA.octave, 4);
+assert.strictEqual(junk.oscA.unison, 1);
+assert.strictEqual(junk.oscA.detune, 1);
+assert.strictEqual(junk.oscA.level, 0.75);
+assert.strictEqual(junk.oscB.unison, 16);
+assert.strictEqual(junk.sub.level, 1);
+assert.strictEqual(junk.sub.octave, -3);
+assert.strictEqual(junk.noise.sample, 'air');
+assert.strictEqual(junk.filter.cutoff, 20000);
+assert.strictEqual(junk.filter.reso, 0);
+assert.strictEqual(junk.ampEnv.attack, 0);
+assert.strictEqual(junk.ampEnv.sustain, 1);
+assert.strictEqual(junk.ampEnv.release, 0.1);
+assert.strictEqual(junk.fx.hyper.wet, 100);
+assert.strictEqual(junk.fx.dist.on, false);
+assert.strictEqual(junk.fx.comp.on, true);
+assert.deepStrictEqual(engine.normalizeDesign(junk), junk, 'normalizing twice changes nothing');
+roundTrip(junk, 'junk design');
+
+// The sub's octave goes into the file; an Init-level oscillator writes no volume.
+const subState = roundTrip(engine.textToDesign('dark bass with sub').design, 'bass with sub').state;
+assert.strictEqual(subState.Oscillator4.plainParams.kParamOctave, -1);
+assert.ok(!('kParamVolume' in subState.Oscillator0.plainParams), 'osc A at Init level writes no volume');
+
+// Variations: repeatable from a seed, different from the source, always valid.
+const src = engine.textToDesign('warm evolving pad with slow attack and long release').design;
+const v1 = engine.varyDesign(src, { seed: 42, name: 'Pad 2' });
+assert.deepStrictEqual(engine.varyDesign(src, { seed: 42, name: 'Pad 2' }), v1, 'same seed, same variation');
+assert.notDeepStrictEqual(v1, engine.varyDesign(src, { seed: 43, name: 'Pad 2' }), 'different seeds differ');
+assert.strictEqual(v1.name, 'Pad 2');
+assert.notDeepStrictEqual(Object.assign({}, v1, { name: src.name }), src, 'a variation changes something');
+assert.deepStrictEqual(engine.varyDesign(src, { seed: 5, amount: 0 }).ampEnv, src.ampEnv, 'amount 0 keeps the envelope');
+for (let seed = 1; seed <= 40; seed++) {
+  const v = engine.varyDesign(src, { seed, amount: 1 });
+  assert.deepStrictEqual(engine.normalizeDesign(v), v, 'variation ' + seed + ' is already normalized');
+  if (seed <= 5) roundTrip(v, 'variation ' + seed);
+}
+
+// The structured-output schemas must follow the API's rules: every object closed and fully required.
+function checkSchema(sch, path) {
+  if (sch.type === 'object') {
+    assert.strictEqual(sch.additionalProperties, false, path + ' additionalProperties');
+    assert.deepStrictEqual([...sch.required].sort(), Object.keys(sch.properties).sort(), path + ' required');
+    for (const [k, v] of Object.entries(sch.properties)) checkSchema(v, path + '.' + k);
+  } else if (sch.type === 'array') checkSchema(sch.items, path + '[]');
+  for (const bad of ['minimum', 'maximum', 'minLength', 'maxLength', 'multipleOf']) assert.ok(!(bad in sch), path + ' uses ' + bad);
+}
+checkSchema(engine.AI_DESIGN_SCHEMA, 'design');
+checkSchema(engine.AI_PACK_SCHEMA, 'pack');
+assert.ok(engine.aiSinglePrompt('glassy pluck', {}).includes('glassy pluck'));
+assert.ok(engine.aiSinglePrompt('x', {}).includes('always set reverbMix and delayMix to 0'));
+assert.ok(engine.aiSinglePrompt('x', { experimentalFx: true }).includes('Reverb and delay are available'));
+assert.ok(engine.aiPackPrompt(['one', 'two'], {}).includes('2. two'));
+
+// Claude's answers map onto designs; experimental effects stay off unless allowed.
+const answer = {
+  name: 'Glass Pluck', category: 'pluck', mono: false,
+  oscA: { wave: 'triangle', octave: 1, unison: 3, detune: 0.12, level: 0.8 },
+  oscB: { enabled: true, wave: 'sine', octave: 2, unison: 1, detune: 0.1, level: 0.3 },
+  sub: { enabled: false, level: 0.5 }, noise: { enabled: true, level: 0.1 },
+  filter: { enabled: true, cutoffHz: 4200, resonance: 25 },
+  ampEnv: { attackMs: 1, decayMs: 350, sustainPercent: 0, releaseMs: 400 },
+  fx: { hyperWet: 30, distortionDrive: 0, distortionMix: 0, compressor: true, reverbMix: 35, delayMix: 20 },
+  notes: ['Bright triangle pluck.'],
+};
+const a1 = engine.fromAi(answer, 'glassy pluck', {});
+assert.strictEqual(a1.design.name, 'Glass Pluck');
+assert.strictEqual(a1.design.category, 'pluck');
+assert.strictEqual(a1.design.oscA.wave, 'triangle');
+assert.strictEqual(a1.design.oscB.on, true);
+assert.strictEqual(a1.design.filter.cutoff, 4200);
+assert.strictEqual(a1.design.ampEnv.decay, 0.35);
+assert.strictEqual(a1.design.ampEnv.sustain, 0);
+assert.strictEqual(a1.design.fx.hyper.on, true);
+assert.strictEqual(a1.design.fx.dist.on, false);
+assert.strictEqual(a1.design.fx.comp.on, true);
+assert.strictEqual(a1.design.fx.reverb.on, false);
+assert.strictEqual(a1.design.fx.delay.on, false);
+assert.deepStrictEqual(a1.notes, ['Bright triangle pluck.']);
+roundTrip(a1.design, 'AI design');
+const a2 = engine.fromAi(answer, 'glassy pluck', { experimentalFx: true });
+assert.strictEqual(a2.design.fx.reverb.on, true);
+assert.strictEqual(a2.design.fx.reverb.wet, 35);
+assert.strictEqual(a2.design.fx.delay.on, true);
+const types = roundTrip(a2.design, 'AI design with experimental FX').state.FXRack0.FX.map((f) => f.type);
+assert.deepStrictEqual(types, [9, 5, 4, 6]);
+// A broken answer falls back to the keyword reading.
+const a3 = engine.fromAi('not json', 'dark reese bass', {});
+assert.strictEqual(a3.design.category, 'reese');
+const a4 = engine.fromAi({ name: 7, oscA: { wave: 'laser', unison: 400 }, filter: { cutoffHz: 'high' } }, 'dark reese bass', {});
+assert.strictEqual(a4.design.oscA.wave, 'saw');
+assert.strictEqual(a4.design.oscA.unison, 16);
+roundTrip(a4.design, 'malformed AI design');
+
 console.log('OK: ' + n + ' presets built and verified');
