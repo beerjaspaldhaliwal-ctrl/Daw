@@ -59,11 +59,20 @@ jobs:
           $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=desktopicon" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "installer exit code $($p.ExitCode)" }
           $app = Join-Path $env:LOCALAPPDATA "Programs\Serum 2 Preset Maker"
-          foreach ($f in "index.html", "engine.js", "synth.js", "app.js", "config.js", "README.md", "FL-Studio-Setup.txt") { if (-not (Test-Path "$app\$f")) { throw "missing after install: $app\$f" } }
+          foreach ($f in "index.html", "engine.js", "synth.js", "app.js", "config.js", "README.md", "FL-Studio-Setup.txt", "icon.ico") { if (-not (Test-Path "$app\$f")) { throw "missing after install: $app\$f" } }
           $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Serum 2 Preset Maker"
           foreach ($l in "Serum 2 Preset Maker.lnk", "Presets folder.lnk", "FL Studio setup steps.lnk") { if (-not (Test-Path "$menu\$l")) { throw "Start menu shortcut missing: $l" } }
           $desk = Join-Path ([Environment]::GetFolderPath("Desktop")) "Serum 2 Preset Maker.lnk"
           if (-not (Test-Path $desk)) { throw "desktop shortcut missing" }
+          # The shortcuts open the tool in its own Edge app window, with the app icon.
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($l in "$menu\Serum 2 Preset Maker.lnk", $desk) {
+            $lnk = $shell.CreateShortcut($l)
+            "$l -> $($lnk.TargetPath) $($lnk.Arguments) (icon $($lnk.IconLocation))"
+            if ($lnk.TargetPath -notmatch 'msedge\.exe$') { throw "shortcut does not start Edge: $($lnk.TargetPath)" }
+            if ($lnk.Arguments -notmatch '^--app="file:///.+/Serum%202%20Preset%20Maker/index\.html"') { throw "shortcut arguments wrong: $($lnk.Arguments)" }
+            if ($lnk.IconLocation -notmatch 'icon\.ico') { throw "shortcut icon wrong: $($lnk.IconLocation)" }
+          }
           foreach ($f in "engine.js", "synth.js", "app.js", "index.html") {
             if ((Get-FileHash "$app\$f").Hash -ne (Get-FileHash "Serum2-Preset-Maker/$f").Hash) { throw "installed $f differs" }
           }
@@ -72,6 +81,18 @@ jobs:
           node Serum2-Preset-Maker/test/check-config.js "$app\config.js" $presets false
           if ($LASTEXITCODE -ne 0) { throw "config.js check failed" }
           "install: OK"
+
+      - name: Installed app runs in Edge (headless)
+        run: |
+          $app = Join-Path $env:LOCALAPPDATA "Programs\Serum 2 Preset Maker"
+          $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Serum 2 Preset Maker\Serum 2 Preset Maker.lnk"))
+          $url = ([regex]::Match($lnk.Arguments, '--app="([^"]+)"')).Groups[1].Value
+          $profile = Join-Path $env:RUNNER_TEMP "edge-profile"
+          $dom = & $lnk.TargetPath --headless=new --disable-gpu --no-first-run --user-data-dir="$profile" --virtual-time-budget=8000 --dump-dom $url | Out-String
+          if ($dom -notmatch 'id="c-filter-cutoff"') { throw "the editor was not built: the page's scripts did not run in Edge" }
+          if ($dom -notmatch 'Sound type: reese') { throw "the first preset was not generated" }
+          if ($dom -notmatch 'id="modules"') { throw "page markup missing" }
+          "Edge rendered the installed app: OK"
 
       - name: Uninstall - app removed, presets folder kept
         run: |

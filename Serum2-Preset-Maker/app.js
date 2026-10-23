@@ -8,7 +8,8 @@
   const $ = (id) => document.getElementById(id);
   const E = window.SerumPresetMaker;
   const CFG = window.PRESET_MAKER_CONFIG || {};
-  const synth = new window.PresetSynth();
+  const Synth = window.PresetSynth;
+  const synth = new Synth();
 
   const store = {
     get(k) { try { return localStorage.getItem('s2pm:' + k); } catch (e) { return null; } },
@@ -23,9 +24,12 @@
 
   const WAVE_LABELS = { sine: 'Sine', triangle: 'Triangle', saw: 'Saw', square: 'Square', pulse: 'Pulse', narrowpulse: 'Narrow pulse' };
   const pct = (v) => Math.round(v * 100) + '%';
+  const pct100 = (v) => Math.round(v) + '%';
   const fmtTime = (s) => (s < 1 ? (s < 0.01 ? (s * 1000).toFixed(1) : Math.round(s * 1000)) + ' ms' : (+s.toFixed(2)) + ' s');
   const fmtHz = (hz) => (hz >= 1000 ? (+(hz / 1000).toFixed(hz >= 10000 ? 1 : 2)) + ' kHz' : Math.round(hz) + ' Hz');
   const signed = (v) => (v > 0 ? '+' : '') + v;
+  const fmtDb = (v) => (v > 0 ? '+' : '') + (+v.toFixed(1)) + ' dB';
+  const entries = (o) => Object.entries(o).map(([v, t]) => [v, t]);
 
   function getPath(obj, path) { return path.split('.').reduce((o, k) => o[k], obj); }
   function setPath(obj, path, v) {
@@ -33,9 +37,9 @@
     keys.reduce((o, k) => o[k], obj)[last] = v;
   }
   function status(id, text, isError) {
-    const el = $(id);
-    el.textContent = text || '';
-    el.className = 'status' + (isError ? ' err' : '');
+    const n = $(id);
+    n.textContent = text || '';
+    n.className = 'status' + (isError ? ' err' : '');
   }
   function el(tag, attrs, ...children) {
     const n = document.createElement(tag);
@@ -57,84 +61,115 @@
     }
   }
   function newItem(design, notes) {
-    return { design, notes: notes || [], original: JSON.parse(JSON.stringify(design)), include: true };
+    return { design, notes: notes || [], original: JSON.parse(JSON.stringify(design)), include: true, levelSig: null };
   }
 
   /* ------------------------------------------------------- editor controls */
 
   // Log-scaled sliders run 0..1000.
   const logScale = (min, max) => ({
-    to: (v) => Math.round((Math.log(v / min) / Math.log(max / min)) * 1000),
+    to: (v) => Math.round((Math.log(Math.max(v, min) / min) / Math.log(max / min)) * 1000),
     from: (x) => min * Math.pow(max / min, x / 1000),
   });
-  const octaves = (lo, hi) => Array.from({ length: hi - lo + 1 }, (_, i) => [String(lo + i), signed(lo + i)]);
-  const WAVE_OPTIONS = E.WAVES.map((w) => [w, WAVE_LABELS[w]]);
-
+  const steps = (lo, hi) => Array.from({ length: hi - lo + 1 }, (_, i) => [String(lo + i), signed(lo + i)]);
   const range = (k, label, min, max, step, fmt) => ({ k, label, type: 'range', min, max, step, fmt });
   const logRange = (k, label, min, max, fmt) => ({ k, label, type: 'log', scale: logScale(min, max), fmt });
   const choice = (k, label, options, cast) => ({ k, label, type: 'select', options, cast });
+  const onOff = (k, label) => choice(k, label, [['true', 'On'], ['false', 'Off']], (v) => v === 'true');
+
   const oscControls = [
-    choice('wave', 'Wave', WAVE_OPTIONS),
-    choice('octave', 'Octave', octaves(-3, 3), Number),
+    choice('wave', 'Wave', entries(WAVE_LABELS)),
+    choice('octave', 'Octave', steps(-3, 3), Number),
+    choice('semi', 'Semitone', steps(-12, 12), Number),
     range('unison', 'Unison', 1, 16, 1, String),
     range('detune', 'Detune', 0, 1, 0.01, (v) => v.toFixed(2)),
+    range('width', 'Width', 0, 100, 1, pct100),
     range('level', 'Level', 0, 1, 0.01, pct),
   ];
-  const MODULES = [
-    { path: 'oscA', title: 'Osc A', controls: oscControls },
-    { path: 'oscB', title: 'Osc B', toggle: true, controls: oscControls },
-    { path: 'sub', title: 'Sub', toggle: true, controls: [choice('octave', 'Octave', octaves(-2, 1), Number), range('level', 'Level', 0, 1, 0.01, pct)] },
-    { path: 'noise', title: 'Noise', toggle: true, controls: [range('level', 'Level', 0, 1, 0.01, pct)] },
-    { path: 'filter', title: 'Filter (MG Low 12)', toggle: true, controls: [logRange('cutoff', 'Cutoff', 20, 20000, fmtHz), range('reso', 'Resonance', 0, 100, 1, (v) => String(Math.round(v)))] },
-    { path: 'ampEnv', title: 'Env 1 (volume)', env: true, controls: [
-      logRange('attack', 'Attack', 0.0005, 10, fmtTime), logRange('decay', 'Decay', 0.01, 20, fmtTime),
-      range('sustain', 'Sustain', 0, 1, 0.01, pct), logRange('release', 'Release', 0.005, 20, fmtTime)] },
-    { path: '', title: 'Voicing', controls: [choice('mono', 'Mode', [['true', 'Mono'], ['false', 'Poly']], (v) => v === 'true'), range('polyCount', 'Poly voices', 1, 32, 1, String)] },
-    { path: 'fx.hyper', title: 'Hyper/Dimension', toggle: true, controls: [range('wet', 'Mix', 0, 100, 1, (v) => Math.round(v) + '%')] },
-    { path: 'fx.dist', title: 'Distortion', toggle: true, controls: [range('drive', 'Drive', 0, 100, 1, (v) => String(Math.round(v))), range('wet', 'Mix', 0, 100, 1, (v) => Math.round(v) + '%')] },
-    { path: 'fx.comp', title: 'Compressor', toggle: true, controls: [] },
-    { path: 'fx.reverb', title: 'Reverb', toggle: true, experimental: true, controls: [range('wet', 'Mix', 0, 100, 1, (v) => Math.round(v) + '%'), range('size', 'Size', 0, 100, 1, (v) => String(Math.round(v)))] },
-    { path: 'fx.delay', title: 'Delay', toggle: true, experimental: true, controls: [range('wet', 'Mix', 0, 100, 1, (v) => Math.round(v) + '%')] },
+  const envControls = (withAmount) => (withAmount ? [range('amount', 'Amount', -100, 100, 1, (v) => signed(Math.round(v)))] : []).concat([
+    logRange('attack', 'Attack', 0.0005, 10, fmtTime), logRange('decay', 'Decay', 0.01, 20, fmtTime),
+    range('sustain', 'Sustain', 0, 1, 0.01, pct), logRange('release', 'Release', 0.005, 20, fmtTime),
+  ]);
+  const GROUPS = [
+    { id: 'g-sources', title: 'Sound sources', modules: [
+      { path: 'oscA', title: 'Osc A', controls: oscControls },
+      { path: 'oscB', title: 'Osc B', toggle: true, controls: oscControls },
+      { path: 'sub', title: 'Sub', toggle: true, controls: [choice('shape', 'Shape', entries(E.SUB_SHAPES)), choice('octave', 'Octave', steps(-2, 1), Number), range('level', 'Level', 0, 1, 0.01, pct)] },
+      { path: 'noise', title: 'Noise', toggle: true, controls: [range('level', 'Level', 0, 1, 0.01, pct)] },
+    ] },
+    { id: 'g-shape', title: 'Filter, envelopes and movement', modules: [
+      { path: 'filter', title: 'Filter', toggle: true, controls: [
+        choice('type', 'Type', entries(E.FILTER_TYPES)), logRange('cutoff', 'Cutoff', 20, 20000, fmtHz),
+        range('reso', 'Resonance', 0, 100, 1, pct100), range('drive', 'Drive', 0, 100, 1, pct100), range('keytrack', 'Keytrack', 0, 100, 1, pct100)] },
+      { path: 'filterEnv', title: 'Filter env (Env 2)', toggle: true, env: 'fe', controls: envControls(true) },
+      { path: 'ampEnv', title: 'Volume env (Env 1)', env: 'amp', controls: envControls(false) },
+      { path: 'lfo', title: 'LFO 1', toggle: true, controls: [
+        choice('target', 'Target', entries(E.LFO_TARGETS)), choice('rate', 'Rate', Object.keys(E.LFO_DIVISIONS).map((r) => [r, r])),
+        choice('shape', 'Shape', entries(E.LFO_SHAPES)), range('amount', 'Amount', -100, 100, 0.5, (v) => signed(+v.toFixed(1)))] },
+      { path: '', title: 'Voicing', controls: [
+        choice('mono', 'Mode', [['true', 'Mono'], ['false', 'Poly']], (v) => v === 'true'), onOff('legato', 'Legato'),
+        range('glide', 'Glide', 0, 1, 0.005, (v) => (v ? fmtTime(v) : 'Off')), range('polyCount', 'Voices', 1, 32, 1, String)] },
+      { path: '', title: 'Macros', togglePath: 'macros', note: 'Macro 1 Brightness (filter), 2 Grit (distortion), 3 Space (reverb + delay), 4 Width (Hyper). Turn them in Serum.', controls: [] },
+    ] },
+    { id: 'g-fx', title: 'Effects (in rack order)', modules: [
+      { path: 'fx.dist', title: 'Distortion', toggle: true, controls: [choice('mode', 'Mode', entries(E.DIST_MODES)), range('drive', 'Drive', 0, 100, 1, pct100), range('wet', 'Mix', 0, 100, 1, pct100)] },
+      { path: 'fx.chorus', title: 'Chorus', toggle: true, controls: [logRange('rate', 'Rate', 0.05, 8, (v) => v.toFixed(2) + ' Hz'), range('depth', 'Depth', 0, 26, 0.5, (v) => v + ' ms'), range('wet', 'Mix', 0, 100, 1, pct100)] },
+      { path: 'fx.flanger', title: 'Flanger', toggle: true, controls: [logRange('rate', 'Rate', 0.02, 8, (v) => v.toFixed(2) + ' Hz'), range('depth', 'Depth', 0, 100, 1, pct100), range('feedback', 'Feedback', 0, 100, 1, pct100), range('wet', 'Mix', 0, 100, 1, pct100)] },
+      { path: 'fx.phaser', title: 'Phaser', toggle: true, controls: [logRange('rate', 'Rate', 0.02, 8, (v) => v.toFixed(2) + ' Hz'), range('depth', 'Depth', 0, 100, 1, pct100), range('feedback', 'Feedback', 0, 100, 1, pct100), range('wet', 'Mix', 0, 100, 1, pct100)] },
+      { path: 'fx.hyper', title: 'Hyper/Dimension', toggle: true, controls: [range('wet', 'Mix', 0, 100, 1, pct100), range('detune', 'Detune', 0, 100, 1, pct100), range('size', 'Dimension', 0, 100, 1, pct100)] },
+      { path: 'fx.eq', title: 'EQ', toggle: true, controls: [choice('lowCut', 'Low cut', entries(E.EQ_LOW_CUTS), Number), range('bass', 'Bass', -12, 12, 0.5, fmtDb), range('treble', 'Treble', -12, 12, 0.5, fmtDb)] },
+      { path: 'fx.comp', title: 'Punch (OTT-style)', toggle: true, controls: [range('amount', 'Amount', 0, 100, 1, pct100)] },
+      { path: 'fx.delay', title: 'Delay', toggle: true, controls: [choice('time', 'Time', entries(E.DELAY_TIMES)), range('feedback', 'Feedback', 0, 95, 1, pct100), onOff('pingpong', 'Ping-pong'), range('wet', 'Mix', 0, 100, 1, pct100)] },
+      { path: 'fx.reverb', title: 'Reverb', toggle: true, controls: [choice('type', 'Type', entries(E.REVERB_TYPES)), range('size', 'Size', 0, 100, 1, pct100), range('wet', 'Mix', 0, 100, 1, pct100)] },
+    ] },
   ];
+  const MODULES = GROUPS.flatMap((g) => g.modules);
   const fullPath = (m, k) => (m.path ? m.path + '.' + k : k);
+  const toggleOf = (m) => (m.togglePath ? m.togglePath : m.toggle ? m.path + '.on' : null);
   const ctlId = (p) => 'c-' + p.replace(/\./g, '-');
+  const modId = (m) => 'm-' + (m.path || m.title).replace(/[^a-z]/gi, '');
 
   function buildEditor() {
-    const grid = $('modules');
-    grid.replaceChildren();
-    for (const m of MODULES) {
-      const card = el('div', { class: 'mod', 'data-path': m.path });
-      const head = el('div', { class: 'mod-head' });
-      if (m.toggle) {
-        const id = ctlId(m.path + '.on');
-        const box = el('input', { type: 'checkbox', id, onchange: (e) => change(m.path + '.on', e.target.checked) });
-        head.append(el('label', { class: 'mod-toggle', for: id }, box, el('span', {}, m.title)));
-      } else {
-        head.append(el('span', { class: 'mod-title' }, m.title));
-      }
-      if (m.experimental) head.append(el('span', { class: 'badge', title: 'Best guess at Serum 2\'s settings; not tested in Serum 2 yet' }, 'experimental'));
-      card.append(head);
-      if (m.env) card.append(el('div', { class: 'env-draw', id: 'env-draw' }));
-      for (const c of m.controls) {
-        const p = fullPath(m, c.k), id = ctlId(p);
-        const row = el('div', { class: 'ctl' });
-        row.append(el('label', { for: id }, c.label));
-        let input;
-        if (c.type === 'select') {
-          input = el('select', { id, onchange: (e) => change(p, c.cast ? c.cast(e.target.value) : e.target.value) },
-            ...c.options.map(([v, t]) => el('option', { value: v }, t)));
+    const host = $('modules');
+    host.replaceChildren();
+    for (const g of GROUPS) {
+      const grid = el('div', { class: 'modules' });
+      host.append(el('h3', { class: 'group-title', id: g.id }, g.title), grid);
+      for (const m of g.modules) {
+        const card = el('div', { class: 'mod', id: modId(m) });
+        const head = el('div', { class: 'mod-head' });
+        const tp = toggleOf(m);
+        if (tp) {
+          const id = ctlId(tp);
+          const box = el('input', { type: 'checkbox', id, onchange: (e) => change(tp, e.target.checked) });
+          head.append(el('label', { class: 'mod-toggle', for: id }, box, el('span', {}, m.title)));
         } else {
-          const isLog = c.type === 'log';
-          input = el('input', {
-            type: 'range', id, min: isLog ? 0 : c.min, max: isLog ? 1000 : c.max, step: isLog ? 1 : c.step,
-            oninput: (e) => change(p, isLog ? c.scale.from(+e.target.value) : +e.target.value),
-          });
-          row.append(el('output', { for: id, id: id + '-v' }));
+          head.append(el('span', { class: 'mod-title' }, m.title));
         }
-        row.insertBefore(input, row.children[1] || null);
-        card.append(row);
+        card.append(head);
+        if (m.env) card.append(el('div', { class: 'env-draw', id: 'env-' + m.env }));
+        if (m.note) card.append(el('p', { class: 'mod-note' }, m.note));
+        for (const c of m.controls) {
+          const p = fullPath(m, c.k), id = ctlId(p);
+          const row = el('div', { class: 'ctl' });
+          row.append(el('label', { for: id }, c.label));
+          let input;
+          if (c.type === 'select') {
+            input = el('select', { id, onchange: (e) => change(p, c.cast ? c.cast(e.target.value) : e.target.value) },
+              ...c.options.map(([v, t]) => el('option', { value: v }, t)));
+            row.append(input);
+          } else {
+            const isLog = c.type === 'log';
+            input = el('input', {
+              type: 'range', id, min: isLog ? 0 : c.min, max: isLog ? 1000 : c.max, step: isLog ? 1 : c.step,
+              oninput: (e) => change(p, isLog ? c.scale.from(+e.target.value) : +e.target.value),
+            });
+            row.append(input, el('output', { for: id, id: id + '-v' }));
+          }
+          card.append(row);
+        }
+        grid.append(card);
       }
-      grid.append(card);
     }
   }
 
@@ -142,18 +177,15 @@
     const it = current();
     if (!it) return;
     const d = it.design;
-    const experimental = $('exp').checked;
     if (document.activeElement !== $('name')) $('name').value = d.name;
     $('r-tags').replaceChildren(...d.tags.map((t) => el('span', { class: 'tag' }, t)));
     for (const m of MODULES) {
-      const card = document.querySelector('.mod[data-path="' + m.path + '"]');
-      if (m.toggle) {
-        const on = getPath(d, m.path + '.on');
-        $(ctlId(m.path + '.on')).checked = on;
-        $(ctlId(m.path + '.on')).disabled = !!m.experimental && !experimental;
+      const card = $(modId(m)), tp = toggleOf(m);
+      if (tp) {
+        const on = !!getPath(d, tp);
+        $(ctlId(tp)).checked = on;
         card.classList.toggle('off', !on);
       }
-      card.hidden = !!m.experimental && !experimental && !getPath(d, m.path + '.on');
       for (const c of m.controls) {
         const p = fullPath(m, c.k), id = ctlId(p), v = getPath(d, p);
         const input = $(id);
@@ -161,23 +193,31 @@
         else input.value = c.type === 'log' ? c.scale.to(v) : v;
         const out = $(id + '-v');
         if (out) out.textContent = c.fmt(v);
-        if (p === 'polyCount') input.closest('.ctl').hidden = d.mono;
+        const row = input.closest('.ctl');
+        if (p === 'polyCount') row.hidden = d.mono;
+        if (p === 'legato') row.hidden = !d.mono;
+        if (/^osc[AB]\.width$/.test(p)) row.hidden = getPath(d, p.replace('width', 'unison')) < 2;
+        if (p === 'fx.eq.bass') row.hidden = !!d.fx.eq.lowCut;
       }
     }
-    drawEnvelope(d.ampEnv);
+    $('m-filterEnv').classList.toggle('off', !d.filterEnv.on || !d.filter.on);
+    if (d.lfo.target === 'cutoff' && !d.filter.on) $('m-lfo').classList.add('off');
+    drawEnvelope('env-amp', d.ampEnv);
+    drawEnvelope('env-fe', d.filterEnv);
     $('notes').replaceChildren(...(it.notes.length ? it.notes : ['Edited by hand.']).map((n) => el('li', {}, n)));
     $('undo').disabled = JSON.stringify(it.original) === JSON.stringify(d);
+    refreshOutput();
     synth.setDesign(d);
   }
 
-  function drawEnvelope(e) {
+  function drawEnvelope(id, e) {
     // Square-root time scale so short and long envelopes both stay readable.
     const W = 220, H = 52, total = Math.sqrt(e.attack) + Math.sqrt(e.decay) + 0.6 + Math.sqrt(e.release);
     const x = (s) => (s / total) * W;
     const a = x(Math.sqrt(e.attack)), dd = a + x(Math.sqrt(e.decay)), hold = dd + x(0.6), r = hold + x(Math.sqrt(e.release));
     const sy = 4 + (1 - e.sustain) * (H - 8);
     const pts = [[0, H - 4], [a, 4], [dd, sy], [hold, sy], [r, H - 4]].map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' ');
-    $('env-draw').innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Envelope shape"><polyline points="' + pts + '" /></svg>';
+    $(id).innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Envelope shape"><polyline points="' + pts + '" /></svg>';
   }
 
   function change(path, value) {
@@ -188,6 +228,48 @@
     refreshEditor();
     renderCards();
     saveSession();
+    scheduleLevel();
+  }
+
+  /* ------------------------------------------------------- level matching */
+
+  const autoLevel = () => $('autoLevel').checked;
+  const levelSig = (d) => JSON.stringify(Object.assign({}, d, { gainDb: 0, name: '', description: '' }));
+  let levelTimer = null;
+
+  function refreshOutput() {
+    const d = current().design;
+    $('gainDb').value = d.gainDb;
+    $('gainDb').disabled = autoLevel();
+    $('gainDb-v').textContent = fmtDb(d.gainDb);
+    $('level-note').textContent = autoLevel()
+      ? (current().levelSig === levelSig(d) ? 'Matched to a finished-preset level.' : 'Measuring…')
+      : 'Set by hand.';
+  }
+
+  // Measures an item and sets its output gain (only when level matching is on).
+  async function matchLevel(it) {
+    if (!autoLevel() || !Synth.autoGain) return;
+    const sig = levelSig(it.design);
+    if (it.levelSig === sig) return;
+    try {
+      const g = await Synth.autoGain(it.design);
+      if (g === null || levelSig(it.design) !== sig) return;
+      it.design.gainDb = g;
+      it.levelSig = sig;
+    } catch (e) { /* no offline audio: keep the current gain */ }
+  }
+  function scheduleLevel() {
+    clearTimeout(levelTimer);
+    if (!autoLevel()) return;
+    levelTimer = setTimeout(async () => {
+      const it = current();
+      await matchLevel(it);
+      if (it === current()) { refreshOutput(); synth.setDesign(it.design); saveSession(); }
+    }, 250);
+  }
+  async function matchAll(items) {
+    for (const it of items) await matchLevel(it);
   }
 
   /* --------------------------------------------------------------- the list */
@@ -196,8 +278,9 @@
     const parts = [WAVE_LABELS[d.oscA.wave] + (d.oscA.unison > 1 ? ' ×' + d.oscA.unison : '')];
     if (d.oscB.on) parts[0] += ' + ' + WAVE_LABELS[d.oscB.wave];
     if (d.sub.on) parts.push('sub');
-    if (d.filter.on) parts.push('LP ' + fmtHz(d.filter.cutoff));
-    const fx = [d.fx.hyper.on && 'width', d.fx.dist.on && 'dist', d.fx.comp.on && 'comp', d.fx.reverb.on && 'reverb', d.fx.delay.on && 'delay'].filter(Boolean);
+    if (d.filter.on) parts.push(E.FILTER_TYPES[d.filter.type] + ' ' + fmtHz(d.filter.cutoff));
+    if (d.lfo.on) parts.push('LFO ' + d.lfo.rate);
+    const fx = E.FX_KEYS.filter((k) => d.fx[k].on).map((k) => ({ dist: 'dist', chorus: 'chorus', flanger: 'flanger', phaser: 'phaser', hyper: 'width', eq: 'EQ', comp: 'punch', delay: 'delay', reverb: 'reverb' })[k]);
     if (fx.length) parts.push(fx.join(', '));
     return parts.join(' · ');
   }
@@ -215,7 +298,7 @@
         el('div', { class: 'card-top' }, box, el('strong', {}, it.design.name)),
         el('div', { class: 'card-sum' }, summary(it.design)),
         el('div', { class: 'card-actions' },
-          el('button', { type: 'button', class: 'small', onclick: () => { select(i); synth.allOff(); synth.setDesign(it.design); synth.playDemo(); } }, 'Play'),
+          el('button', { type: 'button', class: 'small', onclick: () => { select(i); synth.allOff(); synth.setDesign(it.design); synth.playDemo(); startScope(); } }, 'Play'),
           i === state.sel ? el('span', { class: 'editing' }, 'In the editor') : el('button', { type: 'button', class: 'small', onclick: () => select(i) }, 'Edit')));
     }));
   }
@@ -225,6 +308,7 @@
     refreshEditor();
     renderCards();
     saveSession();
+    scheduleLevel();
   }
 
   function setItems(items, batchName) {
@@ -238,18 +322,20 @@
     refreshEditor();
     renderCards();
     saveSession();
+    scheduleLevel();
+    if (items.length > 1) matchAll(items.slice(1)).then(saveSession);
   }
 
   function saveSession() {
-    store.set('session', JSON.stringify({ items: state.items, sel: state.sel, batchName: state.batchName }));
+    store.set('session', JSON.stringify({ v: 3, items: state.items, sel: state.sel, batchName: state.batchName }));
   }
   function loadSession() {
     try {
       const s = JSON.parse(store.get('session') || 'null');
-      if (!s || !Array.isArray(s.items) || !s.items.length) return false;
+      if (!s || s.v !== 3 || !Array.isArray(s.items) || !s.items.length) return false;
       state.items = s.items.map((it) => ({
         design: E.normalizeDesign(it.design), notes: Array.isArray(it.notes) ? it.notes.map(String) : [],
-        original: E.normalizeDesign(it.original || it.design), include: it.include !== false,
+        original: E.normalizeDesign(it.original || it.design), include: it.include !== false, levelSig: it.levelSig || null,
       }));
       state.sel = Math.min(Math.max(0, s.sel | 0), state.items.length - 1);
       state.batchName = String(s.batchName || '');
@@ -269,9 +355,8 @@
 
   // Asks Claude and returns parsed JSON. `kind` is 'single' or 'pack'.
   async function askClaude(kind, input, signal) {
-    const opts = { experimentalFx: $('exp').checked };
     if (sampleCap) {
-      const prompt = kind === 'pack' ? E.aiPackPrompt(input, opts) : E.aiSinglePrompt(input, opts);
+      const prompt = kind === 'pack' ? E.aiPackPrompt(input) : E.aiSinglePrompt(input);
       return sampleCap.json(prompt, { signal, modelTier: 'default' });
     }
     const { default: Anthropic } = await import(SDK_URL);
@@ -285,7 +370,7 @@
         max_tokens: 16000,
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
-        system: E.aiInstructions(opts),
+        system: E.aiInstructions(),
         output_config: { effort: 'medium', format: { type: 'json_schema', schema: kind === 'pack' ? E.AI_PACK_SCHEMA : E.AI_DESIGN_SCHEMA } },
         messages: [{ role: 'user', content: user }],
       }, { signal });
@@ -324,7 +409,7 @@
   /* ------------------------------------------------------------ generating */
 
   const useAi = () => $('mode-ai').checked && aiAvailable();
-  const genOpts = () => ({ experimentalFx: $('exp').checked, author: $('author').value.trim() || undefined });
+  const genOpts = () => ({ author: $('author').value.trim() || undefined });
 
   function beginBusy(label) {
     const ctl = new AbortController();
@@ -401,10 +486,18 @@
     const items = [newItem(first, it.notes)];
     for (let i = 2; i <= count; i++) {
       const v = E.varyDesign(base, { seed: seed + i * 7919, amount: +$('varAmount').value, name: base.name + ' ' + i });
-      items.push(newItem(v, ['Variation ' + i + ' of "' + base.name + '": nearby wave, detune, filter, envelope and effect settings.']));
+      items.push(newItem(v, ['Variation ' + i + ' of "' + base.name + '": nearby wave, detune, filter, movement, envelope and effect settings.']));
     }
     setItems(items, base.name + ' variations');
     status('status', 'Made ' + (count - 1) + ' variations. Play them below, untick any you don\'t want, then save.');
+  }
+
+  function surprise() {
+    const r = E.randomDesign((Date.now() ^ Math.floor(Math.random() * 1e9)) >>> 0);
+    if ($('author').value.trim()) r.design.author = $('author').value.trim();
+    setItems([newItem(r.design, r.notes)]);
+    status('genStatus', 'Made a random ' + r.design.category + ': "' + r.design.name + '".');
+    try { synth.playDemo(); startScope(); } catch (e) { /* audio not allowed yet */ }
   }
 
   /* -------------------------------------------------------------- saving */
@@ -522,9 +615,15 @@
 
   const safeFolder = (s) => String(s || '').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 60);
 
+  async function currentFile() {
+    await matchLevel(current());
+    refreshOutput();
+    return E.presetFile(current().design);
+  }
+
   async function saveCurrent(pickNew) {
-    const f = E.presetFile(current().design);
     try {
+      const f = await currentFile();
       const names = await writeFiles(await folder(pickNew), [f]);
       status('status', 'Saved "' + names[0] + '". Drag it from FL Studio\'s Browser onto Serum 2.');
     } catch (e) {
@@ -533,7 +632,7 @@
   }
 
   async function downloadCurrent() {
-    const f = E.presetFile(current().design);
+    const f = await currentFile();
     if (downloadsCap) {
       if (await offer(f.fileName.replace(/\.SerumPreset$/, '') + '.zip', zip([{ path: f.fileName, bytes: f.bytes }]), 'status')) status('status', 'Saved. Unzip it and drag the .SerumPreset file into Serum 2.');
       return;
@@ -542,12 +641,14 @@
     status('status', 'Downloaded ' + f.fileName + '. Drag it into Serum 2.');
   }
 
-  function chosenFiles() {
-    return state.items.filter((i) => i.include).map((i) => E.presetFile(i.design));
+  async function chosenFiles() {
+    const items = state.items.filter((i) => i.include);
+    await matchAll(items);
+    return items.map((i) => E.presetFile(i.design));
   }
 
   async function saveAll() {
-    const files = chosenFiles();
+    const files = await chosenFiles();
     if (!files.length) return status('listStatus', 'Tick at least one preset to save.', true);
     const sub = safeFolder($('batchName').value) || 'Serum 2 Preset Maker';
     try {
@@ -561,7 +662,7 @@
   }
 
   async function downloadAll() {
-    const files = chosenFiles();
+    const files = await chosenFiles();
     if (!files.length) return status('listStatus', 'Tick at least one preset to download.', true);
     const sub = safeFolder($('batchName').value) || 'Serum 2 Presets';
     const blob = zip(files.map((f) => ({ path: sub + '/' + f.fileName, bytes: f.bytes })));
@@ -682,6 +783,7 @@
 
     $('describe').addEventListener('submit', (e) => { e.preventDefault(); if ($('tab-pack').hidden) makeOne(); else makePack(); });
     $('stop').addEventListener('click', () => state.busy && state.busy.abort());
+    $('surprise').addEventListener('click', surprise);
     for (const c of document.querySelectorAll('.chip')) c.addEventListener('click', () => { $('prompt').value = c.textContent; setTab('one'); makeOne(); });
 
     if (store.get('mode') === 'ai') $('mode-ai').checked = true;
@@ -696,12 +798,14 @@
     $('apiKey').addEventListener('input', keyChanged);
     $('rememberKey').addEventListener('change', keyChanged);
 
-    $('exp').addEventListener('change', () => {
-      const it = current();
-      if (it && !$('exp').checked) { it.design.fx.reverb.on = false; it.design.fx.delay.on = false; }
-      refreshEditor();
-      renderCards();
+    $('autoLevel').checked = store.get('autoLevel') !== 'off';
+    $('autoLevel').addEventListener('change', () => {
+      store.set('autoLevel', autoLevel() ? null : 'off');
+      if (autoLevel()) { current().levelSig = null; scheduleLevel(); }
+      refreshOutput();
     });
+    $('gainDb').addEventListener('input', (e) => { if (!autoLevel()) change('gainDb', +e.target.value); });
+
     $('name').addEventListener('input', (e) => {
       // Kept as typed (spaces included); the file name is cleaned up when saving.
       current().design.name = e.target.value.slice(0, 60) || 'Untitled';
@@ -709,7 +813,7 @@
       saveSession();
     });
     $('name').addEventListener('change', () => change('name', current().design.name));
-    $('undo').addEventListener('click', () => { const it = current(); it.design = JSON.parse(JSON.stringify(it.original)); refreshEditor(); renderCards(); saveSession(); });
+    $('undo').addEventListener('click', () => { const it = current(); it.design = JSON.parse(JSON.stringify(it.original)); it.levelSig = null; refreshEditor(); renderCards(); saveSession(); scheduleLevel(); });
     $('vary').addEventListener('click', makeVariations);
     $('play').addEventListener('click', () => {
       try { synth.playDemo(); startScope(); } catch (e) { status('status', e.message, true); }
@@ -745,6 +849,7 @@
     refreshEditor();
     renderCards();
     refreshAiUi();
+    scheduleLevel();
 
     // Optional runtime capabilities of the online version.
     const use = window.claude && window.claude.use ? (name) => window.claude.use(name).catch(() => null) : () => Promise.resolve(null);

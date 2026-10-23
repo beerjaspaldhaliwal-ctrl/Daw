@@ -124,6 +124,11 @@
   .ctl output { font: 12px var(--mono); font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; }
   .ctl select { grid-column: 2 / 4; }
   .env-draw svg { width: 100%; height: 52px; display: block; }
+  .group-title { font: 600 13px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 8px 0 8px; }
+  #modules { display: grid; gap: 4px; }
+  .mod-note { margin: 0; font-size: 13px; color: var(--muted); }
+  .output-box { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .ctl-wide { grid-template-columns: 74px 1fr 9ch; }
   .env-draw polyline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
 
   .vary { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
@@ -155,7 +160,7 @@
   <header>
     <span class="eyebrow">Text → .SerumPreset</span>
     <h1>Serum 2 Preset Maker</h1>
-    <p>Describe a sound, hear it, fine-tune it, and save it as a Serum 2 preset. Make variations of a sound or a whole pack at once.</p>
+    <p>Describe a sound, hear it, fine-tune it, and save it as a loud, finished Serum 2 preset with working macros. Make variations of a sound or a whole pack at once.</p>
   </header>
 
   <form class="panel" id="describe">
@@ -172,6 +177,9 @@
         <button type="button" class="chip">short bright pluck, punchy</button>
         <button type="button" class="chip">808 sub bass called "Deep 808"</button>
         <button type="button" class="chip">acid lead with resonance 70 and cutoff 600hz</button>
+        <button type="button" class="chip">dubstep wobble bass</button>
+        <button type="button" class="chip">future bass chords with sidechain pump</button>
+        <button type="button" class="chip">lofi chill keys</button>
       </div>
     </div>
     <div id="tab-pack" role="tabpanel" aria-labelledby="tab-pack-btn" class="field" hidden>
@@ -210,10 +218,10 @@ punchy chord stab</textarea>
       </div>
       <div class="actions">
         <button class="primary" type="submit" id="make">Make preset</button>
+        <button class="secondary" type="button" id="surprise">Surprise me</button>
         <button class="secondary" type="button" id="stop" hidden>Stop</button>
       </div>
     </div>
-    <label class="check"><input type="checkbox" id="exp"> Allow reverb and delay (experimental: these settings are a best guess and haven't been tested in Serum 2 yet)</label>
     <p class="status" id="genStatus" aria-live="polite"></p>
   </form>
 
@@ -247,7 +255,17 @@ punchy chord stab</textarea>
       <p class="hint">Click the keys, or play with your computer keyboard: <kbd>A</kbd>–<kbd>;</kbd> for notes, <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> for sharps, <kbd>Z</kbd>/<kbd>X</kbd> to change octave. The preview is an approximation; Serum 2 will sound richer.</p>
     </div>
 
-    <div class="modules" id="modules"></div>
+    <div class="output-box">
+      <label class="check"><input type="checkbox" id="autoLevel" checked> Level-match: set the output so every preset is about as loud as a finished commercial preset</label>
+      <div class="ctl ctl-wide">
+        <label for="gainDb">Output</label>
+        <input type="range" id="gainDb" min="-12" max="12" step="0.5">
+        <output for="gainDb" id="gainDb-v"></output>
+      </div>
+      <p class="hint" id="level-note"></p>
+    </div>
+
+    <div id="modules"></div>
 
     <div class="vary">
       <div class="field">
@@ -310,22 +328,26 @@ punchy chord stab</textarea>
     <details>
       <summary>Words the keyword reader understands</summary>
       <ul>
-        <li><b>Sound type:</b> bass, reese, 808 / sub bass, lead, supersaw / trance, pad, pluck, keys / piano, bell, stab / chord, arp</li>
-        <li><b>Tone:</b> dark, warm, mellow, bright, airy, resonant / acid, wide / huge / lush, detuned, thin, chorus</li>
-        <li><b>Grit:</b> dirty, saturated, distorted, aggressive, growl, clean, punchy / tight (compressor)</li>
-        <li><b>Layers:</b> sub, noise / breathy, single oscillator, no sub</li>
+        <li><b>Sound type:</b> bass, reese, 808 / sub bass, lead, supersaw, pad, pluck, keys / piano, bell, stab / chord, arp</li>
+        <li><b>Genre:</b> dubstep, future bass, trap, house, techno, trance, synthwave / 80s, drum and bass, hardstyle, ambient / cinematic, lofi, EDM / big room</li>
+        <li><b>Tone:</b> dark, warm, mellow, bright, airy, resonant / acid / 303, wide / huge / lush, detuned, thin</li>
+        <li><b>Movement:</b> wobble, evolving / moving, vibrato, tremolo, sidechain / pump, glide / slide</li>
+        <li><b>Grit and punch:</b> dirty, saturated, distorted, aggressive, growl, bitcrushed, clean, punchy / OTT / loud</li>
+        <li><b>Effects:</b> chorus, phaser, flanger, dimension, reverb / hall / dreamy, delay / echo, dry</li>
+        <li><b>Layers:</b> sub, noise / breathy, single oscillator, no sub, fifth</li>
         <li><b>Shape:</b> slow attack / swell, short / snappy, long / sustained, high, low, mono, poly</li>
-        <li><b>Exact values:</b> <code>attack 10ms</code>, <code>decay 300ms</code>, <code>sustain 50%</code>, <code>release 1.2s</code>, <code>cutoff 800hz</code>, <code>resonance 40</code>, <code>unison 7</code>, <code>octave -1</code></li>
+        <li><b>Exact values:</b> <code>attack 10ms</code>, <code>decay 300ms</code>, <code>sustain 50%</code>, <code>release 1.2s</code>, <code>cutoff 800hz</code>, <code>resonance 40</code>, <code>unison 7</code>, <code>octave -1</code>, <code>glide 80ms</code>, <code>reverb 30%</code>, <code>delay 1/8 dotted</code></li>
         <li><b>Name:</b> put it in quotes or write <code>called My Preset</code></li>
       </ul>
     </details>
     <details>
       <summary>What gets set, and what doesn't yet</summary>
       <ul>
-        <li>Each preset starts from Serum 2's own Init patch, so anything not in the editor stays at its Init value.</li>
-        <li>Oscillators use the factory <code>Analog/Basic Shapes</code> wavetable. The waveform positions are approximate.</li>
-        <li>No modulation yet (no LFO or envelope on the cutoff, no glide). Add these in Serum after loading.</li>
-        <li>Envelope decay, sustain and hold, and the sub octave, use parameter names that haven't been confirmed from a real preset yet. If they don't take effect, set them in Serum.</li>
+        <li>Each preset starts from Serum 2's own Init patch. Every setting written uses the names and units found in presets saved by Serum 2 itself.</li>
+        <li>Effects: Distortion, Chorus, Flanger, Phaser, Hyper/Dimension, EQ, Compressor (Punch), Delay and Reverb. Not yet: Bode, Convolve, Utility and the Splitters.</li>
+        <li>Movement: Env 2 on the filter cutoff, and LFO 1 on the cutoff, wavetable position, pitch or volume. Four macros: Brightness, Grit, Space and Width.</li>
+        <li>Level-match adds the missing loudness with a clean gain stage at the end of the effects (a compressor set to 1:1), or lowers the oscillator levels for sounds that are already loud.</li>
+        <li>Oscillators use the factory <code>Analog/Basic Shapes</code> wavetable; the waveform positions are approximate.</li>
         <li>Inside claude.ai, downloads come as a <code>.zip</code>. The installed Windows version saves <code>.SerumPreset</code> files straight into your presets folder.</li>
       </ul>
     </details>

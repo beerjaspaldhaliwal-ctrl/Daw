@@ -22,12 +22,14 @@ The Start menu has a "Presets folder" shortcut that opens it.
    - Open the Browser's options menu and turn on "Show unknown file types".
 
 3. Make a preset and play it
-   - Open Serum 2 Preset Maker from the Start menu or desktop.
+   - Open Serum 2 Preset Maker from the Start menu or desktop. It opens in
+     its own window.
    - Type a description, click "Make preset", then "Save to presets folder".
      The first time, pick the presets folder above. Edge and Chrome
      remember it after that.
    - In FL Studio, add Serum 2 to a channel and drag the preset from the
      Browser onto Serum 2's window.
+   - Turn Serum's macros: 1 Brightness, 2 Grit, 3 Space, 4 Width.
    - Because the folder sits inside Serum 2's User presets, the presets
      also show in Serum 2's own preset browser after you rescan presets
      from Serum 2's menu.

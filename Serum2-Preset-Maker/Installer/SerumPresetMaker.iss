@@ -1,11 +1,12 @@
 ; Serum 2 Preset Maker for FL Studio — Windows installer (Inno Setup 6)
 ;
 ; Build (from the repository's Serum2-Preset-Maker directory):
-;   iscc /DAppVersion=2.0.0 /DOutputDir="<path>" Installer\SerumPresetMaker.iss
+;   iscc /DAppVersion=3.0.0 /DOutputDir="<path>" Installer\SerumPresetMaker.iss
 ;
 ; Installs for the current user only (no admin prompt) to
 ;   %LOCALAPPDATA%\Programs\Serum 2 Preset Maker
-; adds Start menu (and optional desktop) shortcuts that open the tool in the default browser, and
+; adds Start menu (and optional desktop) shortcuts that open the tool in its own window (Microsoft Edge's
+; app mode, which every Windows 10/11 PC has; the default browser if Edge is missing), and
 ; creates the folder the tool saves presets to:
 ;   Documents\Xfer\Serum 2 Presets\Presets\User\Preset Maker   when Serum 2's presets folder exists
 ;   Documents\Serum 2 Preset Maker\Presets                      otherwise
@@ -13,7 +14,7 @@
 ; FL Studio's own settings are not changed: the user adds the folder to FL Studio's Browser (see FL-Studio-Setup.txt).
 
 #ifndef AppVersion
-  #define AppVersion "2.0.0"
+  #define AppVersion "3.0.0"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\build\installer"
@@ -40,6 +41,8 @@ SolidCompression=yes
 WizardStyle=modern
 InfoAfterFile=FL-Studio-Setup.txt
 UninstallDisplayName=Serum 2 Preset Maker {#AppVersion}
+SetupIconFile=icon.ico
+UninstallDisplayIcon={app}\icon.ico
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
@@ -53,16 +56,17 @@ Source: "..\app.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\config.js"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "FL-Studio-Setup.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Serum 2 Preset Maker\Serum 2 Preset Maker"; Filename: "{app}\index.html"; Comment: "Make Serum 2 presets from a text description"
+Name: "{autoprograms}\Serum 2 Preset Maker\Serum 2 Preset Maker"; Filename: "{code:LauncherExe}"; Parameters: "{code:LauncherParams}"; WorkingDir: "{app}"; IconFilename: "{app}\icon.ico"; Comment: "Make Serum 2 presets from a text description"
 Name: "{autoprograms}\Serum 2 Preset Maker\Presets folder"; Filename: "{code:GetPresetDir}"; Comment: "The folder your presets are saved to"
 Name: "{autoprograms}\Serum 2 Preset Maker\FL Studio setup steps"; Filename: "{app}\FL-Studio-Setup.txt"
-Name: "{autodesktop}\Serum 2 Preset Maker"; Filename: "{app}\index.html"; Comment: "Make Serum 2 presets from a text description"; Tasks: desktopicon
+Name: "{autodesktop}\Serum 2 Preset Maker"; Filename: "{code:LauncherExe}"; Parameters: "{code:LauncherParams}"; WorkingDir: "{app}"; IconFilename: "{app}\icon.ico"; Comment: "Make Serum 2 presets from a text description"; Tasks: desktopicon
 
 [Run]
 Filename: "{code:GetPresetDir}"; Description: "Open the presets folder (to drag into FL Studio's Browser)"; Flags: postinstall shellexec nowait skipifsilent
-Filename: "{app}\index.html"; Description: "Open Serum 2 Preset Maker now"; Flags: postinstall shellexec nowait skipifsilent
+Filename: "{code:LauncherExe}"; Parameters: "{code:LauncherParams}"; Description: "Open Serum 2 Preset Maker now"; Flags: postinstall shellexec nowait skipifsilent
 
 [InstallDelete]
 ; Version 1.0 put the Start menu shortcut directly in Programs; it now lives in a folder.
@@ -71,6 +75,52 @@ Type: files; Name: "{autoprograms}\Serum 2 Preset Maker.lnk"
 [Code]
 var
   PresetDir: String;
+
+// Microsoft Edge, used to open the tool in its own app window.
+function EdgePath(): String;
+var
+  Candidates: array of String;
+  I: Integer;
+begin
+  Result := '';
+  SetArrayLength(Candidates, 3);
+  Candidates[0] := ExpandConstant('{commonpf32}\Microsoft\Edge\Application\msedge.exe');
+  if IsWin64 then
+    Candidates[1] := ExpandConstant('{commonpf64}\Microsoft\Edge\Application\msedge.exe');
+  Candidates[2] := ExpandConstant('{localappdata}\Microsoft\Edge\Application\msedge.exe');
+  for I := 0 to GetArrayLength(Candidates) - 1 do
+    if (Candidates[I] <> '') and FileExists(Candidates[I]) then
+    begin
+      Result := Candidates[I];
+      Exit;
+    end;
+end;
+
+// file:///C:/Users/.../index.html with spaces escaped.
+function PageUrl(): String;
+begin
+  Result := ExpandConstant('{app}\index.html');
+  StringChangeEx(Result, '\', '/', True);
+  StringChangeEx(Result, '%', '%25', True);
+  StringChangeEx(Result, ' ', '%20', True);
+  StringChangeEx(Result, '#', '%23', True);
+  Result := 'file:///' + Result;
+end;
+
+function LauncherExe(Param: String): String;
+begin
+  Result := EdgePath();
+  if Result = '' then
+    Result := ExpandConstant('{app}\index.html');
+end;
+
+function LauncherParams(Param: String): String;
+begin
+  if EdgePath() <> '' then
+    Result := '--app="' + PageUrl() + '" --window-size=1280,900'
+  else
+    Result := '';
+end;
 
 function GetPresetDir(Param: String): String;
 var
